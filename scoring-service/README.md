@@ -27,10 +27,46 @@ opstarten automatisch aangemaakt (`Base.metadata.create_all`, idempotent).
 
 ## Endpoints
 
-- `POST /score` — `{source, title, url, raw_content}` →
-  `{item_id, summary, relevance_score}`
+- `POST /score` — `{source, title, url, raw_content, source_id?}` →
+  `{item_id, summary, relevance_score}`. Uitgaande links in `raw_content`
+  worden automatisch als kandidaat-bron geregistreerd (zie hieronder); dit
+  verandert niets aan de response.
 - `POST /feedback` — `{item_id, label: "interessant" | "niet_interessant"}` →
   `{status: "ok"}`, of een `404` als `item_id` niet bestaat.
+- `POST /sources` — `{url, type}` → nieuwe `Source` met `status: "kandidaat"`
+  en `discovery_method: "manual"`. `409` als de `url` al bestaat.
+- `GET /sources?status=kandidaat|actief|gedeactiveerd` — lijst bronnen,
+  optioneel gefilterd op status.
+- `POST /sources/{id}/evaluate` — herbeoordeelt één bron (instroom naar
+  "actief" of krimp naar "gedeactiveerd", zie hieronder) en geeft de
+  bijgewerkte `Source` terug. `404` als de bron niet bestaat.
+
+## Bronbeheer: instroom en krimp
+
+Er is geen vaste bronnenlijst. Bronnen ontstaan op drie manieren:
+handmatig via `POST /sources` (`discovery_method: "manual"`), of automatisch
+doordat een gescoord item linkt naar een nog onbekend domein
+(`discovery_method: "link_following"`, alleen het domein wordt geregistreerd,
+er wordt geen externe request gedaan). Elke nieuwe bron start als
+`"kandidaat"`.
+
+`POST /sources/{id}/evaluate` (los aan te roepen, bijvoorbeeld vanuit een
+testscript; automatische aanroep vanuit een schema komt in Fase 3) past twee
+regels toe, met drempels in `app/config.py` / `.env` (geen codewijziging
+nodig om te kalibreren):
+
+- **Instroom** (`kandidaat` → `actief`): minstens
+  `SOURCE_ACTIVATION_MIN_HIGH_SCORE` (standaard 3) van de laatste
+  `SOURCE_ACTIVATION_WINDOW` (standaard 5) items van die bron scoren boven
+  `SOURCE_ACTIVATION_SCORE_THRESHOLD` (standaard 0.6).
+- **Krimp** (`actief` → `gedeactiveerd`): minstens
+  `SOURCE_DEACTIVATION_MIN_NEGATIVE` (standaard 8) van de laatste
+  `SOURCE_DEACTIVATION_WINDOW` (standaard 10) items zijn als
+  `"niet_interessant"` gelabeld, of `running_avg_score` zakt onder
+  `SOURCE_DEACTIVATION_AVG_SCORE_THRESHOLD` (standaard 0.3).
+
+`running_avg_score` op een `Source` wordt bijgewerkt als voortschrijdend
+gemiddelde telkens wanneer een item met die `source_id` gescoord wordt.
 
 ## Embeddings: Voyage AI of offline "fake"
 

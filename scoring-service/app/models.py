@@ -47,12 +47,27 @@ class EmbeddingVector(TypeDecorator):
         return json.loads(value)
 
 
+class Source(Base):
+    __tablename__ = "sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    url: Mapped[str] = mapped_column(String, unique=True, index=True)
+    type: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="kandidaat", index=True)
+    discovery_method: Mapped[str] = mapped_column(String)
+    running_avg_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    items: Mapped[list["Item"]] = relationship(back_populates="source_ref")
+
+
 class Item(Base):
     __tablename__ = "items"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[str] = mapped_column(String, index=True, default=settings.default_user_id)
     source: Mapped[str] = mapped_column(String)
+    source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String)
     url: Mapped[str] = mapped_column(String)
     raw_content: Mapped[str] = mapped_column(Text)
@@ -62,6 +77,7 @@ class Item(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     feedback: Mapped[list["Feedback"]] = relationship(back_populates="item")
+    source_ref: Mapped["Source | None"] = relationship(back_populates="items")
 
 
 class Feedback(Base):
