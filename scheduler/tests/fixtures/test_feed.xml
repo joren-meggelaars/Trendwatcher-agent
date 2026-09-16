@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Test Security Feed</title>
+    <link>https://test-feed.example.com</link>
+    <description>Lokale testfeed voor de scheduler-verificatie</description>
+    <item>
+      <title>Kritieke kwetsbaarheid in routerfirmware maakt remote code execution mogelijk</title>
+      <link>https://test-feed.example.com/rce-routerfirmware</link>
+      <description>Onderzoekers vinden een kritieke kwetsbaarheid in routerfirmware waarmee aanvallers op afstand code kunnen uitvoeren op netwerkapparatuur.</description>
+      <guid>https://test-feed.example.com/rce-routerfirmware</guid>
+    </item>
+    <item>
+      <title>Nieuwe phishingcampagne imiteert bekende cloudprovider</title>
+      <link>https://test-feed.example.com/phishing-cloud</link>
+      <description>Een phishingcampagne doet zich voor als een bekende cloudprovider om inloggegevens te stelen van medewerkers.</description>
+      <guid>https://test-feed.example.com/phishing-cloud</guid>
+    </item>
+  </channel>
+</rss>

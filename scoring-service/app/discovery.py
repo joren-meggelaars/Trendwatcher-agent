@@ -117,3 +117,26 @@ def evaluate_source(db: Session, source_id: int) -> models.Source | None:
     db.commit()
     db.refresh(source)
     return source
+
+
+def evaluate_all_sources(db: Session) -> list[dict]:
+    """Run evaluate_source over every non-final source, return only the changes."""
+    sources = (
+        db.query(models.Source)
+        .filter(models.Source.status.in_(["kandidaat", "actief"]))
+        .all()
+    )
+    changes = []
+    for source in sources:
+        old_status = source.status
+        updated = evaluate_source(db, source.id)
+        if updated is not None and updated.status != old_status:
+            changes.append(
+                {
+                    "source_id": updated.id,
+                    "url": updated.url,
+                    "old_status": old_status,
+                    "new_status": updated.status,
+                }
+            )
+    return changes

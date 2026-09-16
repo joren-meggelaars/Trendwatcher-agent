@@ -33,13 +33,26 @@ opstarten automatisch aangemaakt (`Base.metadata.create_all`, idempotent).
   verandert niets aan de response.
 - `POST /feedback` — `{item_id, label: "interessant" | "niet_interessant"}` →
   `{status: "ok"}`, of een `404` als `item_id` niet bestaat.
-- `POST /sources` — `{url, type}` → nieuwe `Source` met `status: "kandidaat"`
-  en `discovery_method: "manual"`. `409` als de `url` al bestaat.
+- `POST /sources` — `{url, type, discovery_method?}` → nieuwe `Source` met
+  `status: "kandidaat"`. `discovery_method` is optioneel en standaard
+  `"manual"`; de scheduler geeft hier `"market_sweep"` mee voor bronnen die
+  hij zelf via een zoekopdracht vindt. `409` als de `url` al bestaat.
 - `GET /sources?status=kandidaat|actief|gedeactiveerd` — lijst bronnen,
   optioneel gefilterd op status.
 - `POST /sources/{id}/evaluate` — herbeoordeelt één bron (instroom naar
   "actief" of krimp naar "gedeactiveerd", zie hieronder) en geeft de
   bijgewerkte `Source` terug. `404` als de bron niet bestaat.
+- `POST /sources/evaluate-all` — draait `evaluate_source` over alle bronnen
+  met status `"kandidaat"` of `"actief"` in één keer, en retourneert alleen
+  de bronnen waarvan de status daadwerkelijk wijzigde:
+  `[{source_id, url, old_status, new_status}, ...]`.
+- `GET /feedback-link?item_id=X&label=...` — functioneel identiek aan
+  `POST /feedback` (zelfde databasewijziging), maar bereikbaar via een simpele
+  klikbare GET-link en retourneert een kleine HTML-bevestigingspagina in
+  plaats van JSON. Bedoeld voor feedback-links in e-mails (zie `scheduler/`).
+- `GET /items/recent-feedback?label=...&days=...` — `title` + `summary` van
+  items die in de afgelopen `days` dagen met `label` zijn gemarkeerd. Laat de
+  scheduler kernonderwerpen destilleren zonder rechtstreekse DB-toegang.
 
 ## Bronbeheer: instroom en krimp
 

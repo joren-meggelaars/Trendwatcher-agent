@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 SourceStatus = Literal["kandidaat", "actief", "gedeactiveerd"]
 DiscoveryMethod = Literal["seed", "link_following", "market_sweep", "manual"]
+FeedbackLabel = Literal["interessant", "niet_interessant"]
 
 
 class ScoreRequest(BaseModel):
@@ -23,16 +24,24 @@ class ScoreResponse(BaseModel):
 
 class FeedbackRequest(BaseModel):
     item_id: int
-    label: Literal["interessant", "niet_interessant"]
+    label: FeedbackLabel
 
 
 class FeedbackResponse(BaseModel):
     status: Literal["ok"] = "ok"
 
 
+class RecentFeedbackItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    title: str
+    summary: str | None
+
+
 class SourceCreate(BaseModel):
     url: str
     type: str
+    discovery_method: DiscoveryMethod = "manual"
 
 
 class SourceResponse(BaseModel):
@@ -45,3 +54,10 @@ class SourceResponse(BaseModel):
     discovery_method: DiscoveryMethod
     running_avg_score: float | None
     created_at: datetime
+
+
+class SourceStatusChange(BaseModel):
+    source_id: int
+    url: str
+    old_status: SourceStatus
+    new_status: SourceStatus

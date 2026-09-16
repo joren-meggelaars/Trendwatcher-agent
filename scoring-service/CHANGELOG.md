@@ -3,6 +3,40 @@
 Alle noemenswaardige wijzigingen aan de scoring-service worden hier bijgehouden.
 Formaat losjes gebaseerd op [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Endpoints voor de eigen Python-scheduler (n8n-vervanging)
+
+Vijf aanpassingen zodat een nieuwe `scheduler/`-component (los onderdeel,
+communiceert alleen via HTTP) de scoring-service kan aansturen zonder ooit
+rechtstreeks in de database te kijken. `/score` en `/feedback` blijven
+ongewijzigd werken.
+
+### Added
+- **`GET /items/recent-feedback?label=...&days=...`** — `title` + `summary`
+  van items gelabeld binnen de opgegeven periode. Voor de wekelijkse
+  discovery-job om zoektermen te destilleren uit recent gemarkeerde content.
+- **`POST /sources/evaluate-all`** — draait `evaluate_source` over alle
+  bronnen met status `kandidaat`/`actief` in één aanroep en retourneert alleen
+  de daadwerkelijke statuswijzigingen (`app/discovery.py:evaluate_all_sources`).
+- **`GET /feedback-link?item_id=...&label=...`** — GET-variant van
+  `POST /feedback` (zelfde databasewijziging via een gedeelde
+  `_record_feedback`-helper), retourneert een HTML-bevestigingspagina.
+  Nodig omdat feedback-links in een e-mail alleen als klikbare GET werken.
+- **`SourceCreate.discovery_method`** (optioneel, default `"manual"`) — laat
+  de scheduler zijn eigen market-sweep-bronnen correct taggen als
+  `"market_sweep"` in plaats van `"manual"`.
+- Tests (`tests/test_scheduler_support.py`, 6 nieuw) voor alle drie de nieuwe
+  endpoints, inclusief een gecombineerd instroom+krimp-scenario via één
+  `evaluate-all`-aanroep.
+
+### Verified
+- Alle 19 tests slagen (13 bestaand + 6 nieuw): `uv run pytest`.
+- Live tegen een draaiende server: `GET /feedback-link` geklikt via curl gaf
+  dezelfde wijziging als `POST /feedback` (geverifieerd via
+  `GET /items/recent-feedback`); `POST /sources/evaluate-all` rapporteerde in
+  één aanroep zowel een instroom- als een krimp-statuswijziging correct.
+
+(Zie `scheduler/README.md` voor de component die deze endpoints gebruikt.)
+
 ## [Unreleased] — Dynamische bronnenlijst (Fase 1, vervolg)
 
 Uitbreiding op de oorspronkelijke Fase 1-scope: geen vaste bronnenlijst meer,

@@ -1,0 +1,22 @@
+[project]
+name = "scheduler"
+version = "0.1.0"
+description = "Security Trendwatch Agent — eigen Python-scheduler (vervangt n8n voor Fase 1/2)"
+requires-python = ">=3.11"
+dependencies = [
+    "feedparser>=6.0",
+    "httpx>=0.27",
+    "apscheduler>=3.10",
+    "python-dotenv>=1.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
