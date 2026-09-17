@@ -12,6 +12,23 @@ from app.config import settings
 _URL_RE = re.compile(r'https?://[^\s"\'<>]+')
 
 
+def create_source(db: Session, url: str, type_: str, discovery_method: str = "manual") -> models.Source | None:
+    """Shared implementation behind POST /sources and the admin sources form.
+
+    Returns None if a Source with this url already exists — callers decide
+    how to surface that (409 for the JSON API, a no-op redirect for the GUI).
+    """
+    existing = db.query(models.Source).filter(models.Source.url == url).first()
+    if existing is not None:
+        return None
+
+    source = models.Source(url=url, type=type_, status="kandidaat", discovery_method=discovery_method)
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+    return source
+
+
 def extract_links(raw_content: str) -> list[str]:
     return _URL_RE.findall(raw_content)
 
