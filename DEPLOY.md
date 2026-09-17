@@ -64,7 +64,20 @@ Start alle drie de containers. `scoring-service` wacht op Postgres'
 healthcheck (niet alleen op "container bestaat") voordat hij zelf opstart;
 `scheduler` wacht op de gezondheidscheck van `scoring-service`.
 
-## 5. Controleren dat alles draait
+## 5. Initiële bronnenlijst seeden
+
+Eenmalig, direct na de eerste start — de Postgres-database begint leeg
+(schone start, geen data-migratie vanuit de oude SQLite-instantie):
+
+```bash
+docker compose run --rm scoring-service python -m scripts.seed_sources
+```
+
+Voegt een vaste lijst RSS-bronnen toe met status `"kandidaat"` (zie
+`scripts/seed_sources.py`). Idempotent — opnieuw draaien slaat bronnen over
+die al bestaan, dus geen probleem bij een herhaalde deployment.
+
+## 6. Controleren dat alles draait
 
 ```bash
 docker compose ps
@@ -95,7 +108,7 @@ De admin-GUI is bereikbaar op `http://<BIND_ADDRESS>:8000/admin/login` vanaf
 elk toestel binnen hetzelfde netwerk — niet van buitenaf (daar staat de
 bestaande reverse proxy voor, die hier niet is meegenomen).
 
-## 6. Geautomatiseerde tests draaien tegen de Postgres-container
+## 7. Geautomatiseerde tests draaien tegen de Postgres-container
 
 De bestaande testsuite (scoring, feedback, sources, scheduler-support,
 admin) draait standaard tegen een snelle in-memory SQLite-database. Om
@@ -113,7 +126,7 @@ dus `postgres` is bereikbaar. Alle tests moeten slagen — als dat zo is, is
 het pgvector-embeddingpad ook daadwerkelijk doorlopen (niet alleen de
 SQLite-JSON-fallback).
 
-## 7. Data-persistentie verifiëren
+## 8. Data-persistentie verifiëren
 
 ```bash
 # maak een bron aan
