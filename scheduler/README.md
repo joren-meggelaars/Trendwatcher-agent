@@ -10,8 +10,9 @@ van elkaar naar Azure kunnen (Container App / Function).
 ```bash
 uv sync
 cp .env.example .env
-# vul minimaal SCORING_SERVICE_URL in; SMTP_* en SEARCH_* mogen leeg blijven
-# om zonder e-mail/zoek-API te testen (zie hieronder)
+# vul minimaal SCORING_SERVICE_URL in; GRAPH_*/DIGEST_MAILBOX en SEARCH_*
+# mogen leeg blijven om zonder e-mail/zoek-API te testen (zie hieronder) —
+# DIGEST_DRY_RUN staat standaard op true
 ```
 
 ## Jobs
@@ -20,9 +21,11 @@ cp .env.example .env
   (`GET /sources?status=actief`), parst hun RSS-feed met `feedparser`, scoort
   nieuwe items via `POST /score` (met `source_id`), selecteert de top-N op
   `relevance_score` en verstuurt een HTML-digest met per item twee
-  feedback-links (`GET /feedback-link?item_id=...&label=...`). Zonder
-  `SMTP_HOST` wordt de digest-HTML naar de console gelogd in plaats van
-  verstuurd — handig om te testen voordat SMTP is ingericht.
+  feedback-links (`GET /feedback-link?item_id=...&label=...`) via de
+  Microsoft Graph `sendMail`-API (`POST /users/{DIGEST_MAILBOX}/sendMail`,
+  zie `graph_client.py`). Met `DIGEST_DRY_RUN=true` (standaard) wordt de
+  digest-HTML naar de console gelogd in plaats van verstuurd — zo te testen
+  voordat de Graph-app-registratie klaarstaat.
 - **`jobs/weekly_discovery.py`** — haalt recente `"interessant"`-items op
   (`GET /items/recent-feedback?label=interessant&days=...`), distilleert
   daaruit een paar zoektermen (woordfrequentie op titels, geen NLP nodig),
@@ -49,6 +52,21 @@ uv run python main.py
 Start een `APScheduler`-`BlockingScheduler` met twee cron-triggers:
 `daily_digest` dagelijks op `DIGEST_HOUR`, `weekly_discovery` wekelijks op
 `DISCOVERY_DAY`/`DISCOVERY_HOUR` (zie `.env.example`).
+
+## Microsoft Graph: verzenden (en later lezen) van mail
+
+Mail loopt via de Microsoft Graph API met de client-credentials (app-only)
+flow, niet via SMTP/IMAP. `graph_client.py` gebruikt `msal` om met
+`GRAPH_TENANT_ID`/`GRAPH_CLIENT_ID`/`GRAPH_CLIENT_SECRET` een access token op
+te halen (`get_graph_token()`); MSAL cachet dat token zelf tot vlak voor het
+verloopt (~1 uur), dus elke aanroep vraagt niet opnieuw een token op.
+
+De bijbehorende Azure AD app-registratie heeft de **application**-permissie
+`Mail.Send` nodig (met admin consent) op `GRAPH_TENANT_ID`, en
+`DIGEST_MAILBOX` moet een mailbox zijn die die app-registratie mag benaderen
+(bijv. `jorensblogbox@meggelaars.nl`). Zolang die registratie er nog niet is,
+laat `DIGEST_DRY_RUN=true` staan — dan wordt nooit echt geprobeerd een token
+op te halen of mail te versturen.
 
 ## SearchProvider: nog geen keuze gemaakt
 

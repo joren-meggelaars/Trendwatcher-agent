@@ -15,16 +15,30 @@ load_dotenv()
 
 SCORING_SERVICE_URL = os.environ.get("SCORING_SERVICE_URL", "http://127.0.0.1:8000").rstrip("/")
 
-# SMTP: leave SMTP_HOST empty to log the digest to the console instead of sending it.
-SMTP_HOST = os.environ.get("SMTP_HOST", "")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_USER = os.environ.get("SMTP_USER", "")
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
-DIGEST_FROM_EMAIL = os.environ.get("DIGEST_FROM_EMAIL", SMTP_USER or "trendwatcher@localhost")
+# Microsoft Graph (client-credentials / app-only flow) — mail goes through
+# Graph's sendMail, not SMTP/IMAP. The app registration needs application
+# permission Mail.Send (with admin consent) on GRAPH_TENANT_ID.
+GRAPH_TENANT_ID = os.environ.get("GRAPH_TENANT_ID", "")
+GRAPH_CLIENT_ID = os.environ.get("GRAPH_CLIENT_ID", "")
+GRAPH_CLIENT_SECRET = os.environ.get("GRAPH_CLIENT_SECRET", "")
+
+# Mailbox the Graph app sends as (POST /users/{DIGEST_MAILBOX}/sendMail).
+DIGEST_MAILBOX = os.environ.get("DIGEST_MAILBOX", "")
 DIGEST_TO_EMAIL = os.environ.get("DIGEST_TO_EMAIL", "")
+
+# True (default): log the composed digest to the console instead of actually
+# calling Graph's sendMail — safe default before the app registration exists.
+DIGEST_DRY_RUN = os.environ.get("DIGEST_DRY_RUN", "true").strip().lower() not in ("false", "0", "no")
 
 DIGEST_HOUR = int(os.environ.get("DIGEST_HOUR", "7"))
 DIGEST_TOP_N = int(os.environ.get("DIGEST_TOP_N", "5"))
+
+# Optional pause between successive POST /score calls in daily_digest, in
+# seconds. Default 0 (no delay) — added as a safety valve for burst-related
+# issues (e.g. Voyage's free-tier rate limit of 3 req/min when
+# EMBEDDING_PROVIDER=voyage on the scoring-service), not because it's needed
+# for every setup.
+SCORE_REQUEST_DELAY_SECONDS = float(os.environ.get("SCORE_REQUEST_DELAY_SECONDS", "0"))
 
 # APScheduler day-of-week name, e.g. "mon", "tue", ... "sun".
 DISCOVERY_DAY = os.environ.get("DISCOVERY_DAY", "mon")

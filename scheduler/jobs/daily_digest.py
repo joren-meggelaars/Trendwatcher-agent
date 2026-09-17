@@ -5,15 +5,23 @@ Runs standalone for testing:
     uv run python -m jobs.daily_digest
 """
 
+import html
 import logging
-import smtplib
-from email.message import EmailMessage
+import time
+from datetime import datetime, timezone
 
 import feedparser
 import httpx
 
 import config
+from graph_client import get_graph_token
 from seen_items import SeenItemsCache
+
+DIGEST_SUBJECT = "Security Trendwatch — dagelijkse digest"
+
+# score_entry retries a failed POST /score up to twice, waiting these many
+# seconds before each retry, before giving up on the item.
+_SCORE_RETRY_DELAYS = (1, 3)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +34,7 @@ def fetch_active_sources(client: httpx.Client) -> list[dict]:
 
 def fetch_new_entries(source: dict, seen: SeenItemsCache) -> list[dict]:
     parsed = feedparser.parse(source["url"])
+    source_name = parsed.feed.get("title") or source["url"]
     new_entries = []
     for entry in parsed.entries:
         link = entry.get("link", "")
@@ -36,12 +45,21 @@ def fetch_new_entries(source: dict, seen: SeenItemsCache) -> list[dict]:
                 "title": entry.get("title") or "(geen titel)",
                 "link": link,
                 "raw_content": entry.get("summary") or entry.get("title") or "",
+                "source_name": source_name,
             }
         )
     return new_entries
 
 
 def score_entry(client: httpx.Client, entry: dict, source: dict) -> dict:
+    """POST /score for one RSS entry, retrying transient failures.
+
+    Retries up to len(_SCORE_RETRY_DELAYS) times (with backoff) on a
+    connection-level error or a 5xx response — the kind of failure that can
+    come from a hiccup in the connection rather than a genuine problem with
+    this item. A 4xx response (e.g. an unknown source_id) is not retried,
+    since retrying won't change the outcome.
+    """
     payload = {
         "source": source["url"],
         "title": entry["title"],
@@ -49,12 +67,46 @@ def score_entry(client: httpx.Client, entry: dict, source: dict) -> dict:
         "raw_content": entry["raw_content"],
         "source_id": source["id"],
     }
-    resp = client.post(f"{config.SCORING_SERVICE_URL}/score", json=payload)
-    resp.raise_for_status()
-    result = resp.json()
-    result["title"] = entry["title"]
-    result["url"] = entry["link"]
-    return result
+
+    attempts = len(_SCORE_RETRY_DELAYS) + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            resp = client.post(f"{config.SCORING_SERVICE_URL}/score", json=payload)
+            resp.raise_for_status()
+            result = resp.json()
+            result["title"] = entry["title"]
+            result["url"] = entry["link"]
+            result["source_name"] = entry["source_name"]
+            result["source_url"] = source["url"]
+            return result
+        except httpx.HTTPError as exc:
+            is_last_attempt = attempt == attempts
+            is_client_error = (
+                isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500
+            )
+            logger.warning(
+                "POST /score mislukt (poging %d/%d, %s) voor %s "
+                "(len(raw_content)=%d, tijdstip=%s)",
+                attempt, attempts, exc, entry["link"],
+                len(entry["raw_content"]), datetime.now(timezone.utc).isoformat(),
+            )
+            if is_client_error or is_last_attempt:
+                raise
+            time.sleep(_SCORE_RETRY_DELAYS[attempt - 1])
+
+    raise AssertionError("unreachable")  # loop always returns or raises
+
+
+def _safe_link(url: str, label: str) -> str:
+    """Render an <a> tag, escaping text/attribute content — RSS content comes
+    from third-party feeds we don't control. Falls back to plain escaped text
+    if the URL isn't http(s), so a malicious feed can't smuggle in a
+    javascript: link or break out of the attribute.
+    """
+    escaped_label = html.escape(label)
+    if url.lower().startswith(("http://", "https://")):
+        return f'<a href="{html.escape(url, quote=True)}">{escaped_label}</a>'
+    return escaped_label
 
 
 def build_digest_html(top_items: list[dict]) -> str:
@@ -68,44 +120,51 @@ def build_digest_html(top_items: list[dict]) -> str:
         )
         rows.append(
             "<tr>"
-            f"<td>{item['title']}</td>"
-            f"<td>{item['summary']}</td>"
+            f"<td>{_safe_link(item['url'], item['title'])}</td>"
+            f"<td>{_safe_link(item['source_url'], item['source_name'])}</td>"
+            f"<td>{html.escape(item['summary'])}</td>"
             f"<td>{item['relevance_score']:.2f}</td>"
-            f'<td><a href="{interessant_url}">Interessant</a> | '
-            f'<a href="{niet_url}">Niet interessant</a></td>'
+            f'<td><a href="{html.escape(interessant_url, quote=True)}">\U0001F44D</a> '
+            f'<a href="{html.escape(niet_url, quote=True)}">\U0001F44E</a></td>'
             "</tr>"
         )
     return (
         "<html><body>"
-        "<h1>Security Trendwatch — dagelijkse digest</h1>"
+        f"<h1>{DIGEST_SUBJECT}</h1>"
         '<table border="1" cellpadding="6" cellspacing="0">'
-        "<tr><th>Titel</th><th>Samenvatting</th><th>Score</th><th>Feedback</th></tr>"
+        "<tr><th>Titel</th><th>Bron</th><th>Samenvatting</th><th>Score</th><th>Feedback</th></tr>"
         f"{''.join(rows)}"
         "</table></body></html>"
     )
 
 
-def send_digest(html: str) -> None:
-    if not config.SMTP_HOST or not config.DIGEST_TO_EMAIL:
+def send_digest(html_body: str) -> None:
+    if config.DIGEST_DRY_RUN or not config.DIGEST_MAILBOX or not config.DIGEST_TO_EMAIL:
         logger.info(
-            "SMTP_HOST/DIGEST_TO_EMAIL niet geconfigureerd — digest wordt naar console gelogd:\n%s",
-            html,
+            "digest_dry_run staat aan (of DIGEST_MAILBOX/DIGEST_TO_EMAIL ontbreekt) — "
+            "digest wordt naar console gelogd in plaats van verstuurd via Graph.\n"
+            "Onderwerp: %s\nAan: %s\n%s",
+            DIGEST_SUBJECT, config.DIGEST_TO_EMAIL, html_body,
         )
         return
 
-    message = EmailMessage()
-    message["Subject"] = "Security Trendwatch — dagelijkse digest"
-    message["From"] = config.DIGEST_FROM_EMAIL
-    message["To"] = config.DIGEST_TO_EMAIL
-    message.set_content("Deze e-mail bevat HTML; open in een HTML-mailclient om de digest te zien.")
-    message.add_alternative(html, subtype="html")
-
-    with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT) as smtp:
-        smtp.starttls()
-        if config.SMTP_USER:
-            smtp.login(config.SMTP_USER, config.SMTP_PASSWORD)
-        smtp.send_message(message)
-    logger.info("Digest verzonden naar %s", config.DIGEST_TO_EMAIL)
+    token = get_graph_token()
+    payload = {
+        "message": {
+            "subject": DIGEST_SUBJECT,
+            "body": {"contentType": "HTML", "content": html_body},
+            "toRecipients": [{"emailAddress": {"address": config.DIGEST_TO_EMAIL}}],
+        },
+        "saveToSentItems": "false",
+    }
+    resp = httpx.post(
+        f"https://graph.microsoft.com/v1.0/users/{config.DIGEST_MAILBOX}/sendMail",
+        json=payload,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    logger.info("Digest verzonden via Graph naar %s", config.DIGEST_TO_EMAIL)
 
 
 def run() -> None:
@@ -123,8 +182,15 @@ def run() -> None:
                 try:
                     scored_items.append(score_entry(client, entry, source))
                 except httpx.HTTPError:
-                    logger.exception("Kon item niet scoren: %s", entry["link"])
+                    logger.exception(
+                        "Kon item definitief niet scoren (na retries): %s "
+                        "(len(raw_content)=%d, tijdstip=%s)",
+                        entry["link"], len(entry["raw_content"]), datetime.now(timezone.utc).isoformat(),
+                    )
                     continue
+                finally:
+                    if config.SCORE_REQUEST_DELAY_SECONDS:
+                        time.sleep(config.SCORE_REQUEST_DELAY_SECONDS)
                 seen.mark_seen(source["id"], entry["link"])
 
         seen.save()
