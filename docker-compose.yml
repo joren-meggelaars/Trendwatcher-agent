@@ -79,8 +79,16 @@ services:
       DIGEST_TO_EMAIL: ${DIGEST_TO_EMAIL}
       DIGEST_DRY_RUN: ${DIGEST_DRY_RUN:-true}
       DIGEST_HOUR: ${DIGEST_HOUR:-7}
+      DIGEST_TOP_N: ${DIGEST_TOP_N:-5}
+      # Tuned against Voyage's free-tier rate limit (3 req/min) — do not drop
+      # this back to the config.py default of 0 without checking that limit
+      # no longer applies (e.g. a paid Voyage plan).
+      SCORE_REQUEST_DELAY_SECONDS: ${SCORE_REQUEST_DELAY_SECONDS:-0}
       DISCOVERY_DAY: ${DISCOVERY_DAY:-mon}
       DISCOVERY_HOUR: ${DISCOVERY_HOUR:-8}
+      DISCOVERY_LOOKBACK_DAYS: ${DISCOVERY_LOOKBACK_DAYS:-30}
+      DISCOVERY_MAX_SEARCH_TERMS: ${DISCOVERY_MAX_SEARCH_TERMS:-5}
+      DISCOVERY_RESULTS_PER_TERM: ${DISCOVERY_RESULTS_PER_TERM:-5}
       SEARCH_PROVIDER: ${SEARCH_PROVIDER:-}
       SEARCH_API_KEY: ${SEARCH_API_KEY:-}
     depends_on:
