@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Batch-toevoegen — Trendwatcher Admin{% endblock %}
+{% block content %}
+<h1>Batch-toevoegen via URL's</h1>
+<form method="post" action="/admin/items/batch-add" class="add-form">
+  <p><label>Eén URL per regel<br>
+    <textarea name="urls" rows="10" cols="70" placeholder="https://example.com/artikel-1&#10;https://example.com/artikel-2"></textarea>
+  </label></p>
+  <button type="submit">Verwerken</button>
+</form>
+
+{% if results is not none %}
+<h2>Resultaat ({{ results|selectattr("ok")|list|length }} gelukt, {{ results|rejectattr("ok")|list|length }} mislukt)</h2>
+<table>
+<tr><th>URL</th><th>Status</th><th>Titel / reden</th><th>Score</th></tr>
+{% for r in results %}
+<tr>
+  <td>{{ r.url }}</td>
+  <td>
+    {% if r.ok %}<span class="status status-actief">OK</span>
+    {% else %}<span class="status status-gedeactiveerd">Fout</span>{% endif %}
+  </td>
+  <td>{{ r.title if r.ok else r.reason }}</td>
+  <td>{{ "%.2f"|format(r.score) if r.ok else "—" }}</td>
+</tr>
+{% endfor %}
+</table>
+{% endif %}
+{% endblock %}

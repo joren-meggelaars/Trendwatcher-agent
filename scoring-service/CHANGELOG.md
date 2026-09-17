@@ -3,6 +3,55 @@
 Alle noemenswaardige wijzigingen aan de scoring-service worden hier bijgehouden.
 Formaat losjes gebaseerd op [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Lokale admin-GUI (/admin/*)
+
+Server-rendered Jinja2-beheerinterface direct in de bestaande FastAPI-app,
+achter een simpele sessie-login. `/score`, `/feedback`, `/sources` blijven
+ongewijzigd en puur JSON.
+
+### Added
+- `app/auth.py`: bcrypt-wachtwoordhash (passlib) + sessie-cookie-check
+  (`require_admin_session`), één vast account via `ADMIN_USERNAME` /
+  `ADMIN_PASSWORD_HASH`.
+- `app/admin.py`: alle `/admin/*`-routes (login/logout, bronnenoverzicht met
+  handmatige status-override en toevoegformulier, itemsoverzicht met
+  filters + paginering, batch-toevoegen via URL's).
+- `app/templates/*.html`: server-rendered Jinja2-templates, minimale inline
+  CSS, geen JS-framework.
+- `scripts/hash_admin_password.py`: genereert een bcrypt-hash voor
+  `ADMIN_PASSWORD_HASH`.
+- `SessionMiddleware` (Starlette, ondertekend met `SESSION_SECRET_KEY`) in
+  `app/main.py`. Een leeg gelaten `SESSION_SECRET_KEY` genereert een
+  willekeurige sleutel per processtart (veilig by default; bestaande
+  sessies overleven dan geen herstart).
+- 8 nieuwe tests (`tests/test_admin.py`): redirect bij niet-ingelogd, foute
+  login geeft nette 401 (geen 500), volledige login→pagina's→logout-flow,
+  bronformulier zichtbaar na herladen, status-override, batch-add met
+  succes+falen.
+
+### Changed
+- `app/scoring.py`: nieuwe `score_and_store()` bevat nu de gedeelde
+  scoringslogica (embedding, relevance, opslag, discovery-hooks) — gebruikt
+  door zowel `POST /score` als `/admin/items/batch-add`, geen dubbele
+  implementatie.
+- `app/discovery.py`: nieuwe `create_source()` bevat de gedeelde
+  bron-aanmaaklogica — gebruikt door zowel `POST /sources` als het
+  admin-bronformulier.
+- `app/config.py`: `Settings` uitgebreid met `admin_username`,
+  `admin_password_hash`, `session_secret_key`.
+
+### Verified
+- Alle 27 tests slagen (19 bestaand + 8 nieuw): `uv run pytest`.
+- Live tegen een draaiende server: volledige cookie-login-flow (fout
+  wachtwoord → 401 met nette foutmelding; correct wachtwoord → sessie-cookie
+  + toegang tot alle `/admin/*`-pagina's), bronformulier zichtbaar na
+  herladen, status-override zichtbaar via `GET /sources`, en batch-add met
+  2 echte URL's + 1 ongeldige URL gaf exact "2 gelukt, 1 mislukt" met titel
+  + score op de successen en een duidelijke reden op de mislukking.
+- Tijdens het testen ontdekt en gefixt: een leeg gelaten `SESSION_SECRET_KEY=`
+  in `.env` overschreef de willekeurige-sleutel-default met een lege,
+  voorspelbare string — nu afgevangen met een validator.
+
 ## [Unreleased] — Endpoints voor de eigen Python-scheduler (n8n-vervanging)
 
 Vijf aanpassingen zodat een nieuwe `scheduler/`-component (los onderdeel,

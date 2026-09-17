@@ -54,6 +54,35 @@ opstarten automatisch aangemaakt (`Base.metadata.create_all`, idempotent).
   items die in de afgelopen `days` dagen met `label` zijn gemarkeerd. Laat de
   scheduler kernonderwerpen destilleren zonder rechtstreekse DB-toegang.
 
+## Lokale admin-GUI (/admin/*)
+
+Server-rendered (Jinja2, geen React/build-stap) beheerinterface, direct in
+deze FastAPI-app maar volledig gescheiden van de JSON-API hierboven
+(`/score`, `/feedback`, `/sources` blijven puur JSON). Uitsluitend bedoeld
+voor lokaal/intern netwerkgebruik — geen internetblootstelling, geen zware
+auth.
+
+Setup (eenmalig):
+
+```bash
+uv run python -m scripts.hash_admin_password   # genereert een bcrypt-hash
+# zet ADMIN_USERNAME en de hash in .env als ADMIN_PASSWORD_HASH
+```
+
+- `GET/POST /admin/login`, `POST /admin/logout` — sessie-cookie-auth (via
+  Starlette's `SessionMiddleware`, ondertekend met `SESSION_SECRET_KEY`).
+  Niet ingelogd → elke andere `/admin/*`-route stuurt door naar
+  `/admin/login`.
+- `GET/POST /admin/sources` — bronnentabel (status, gem. score, aantal
+  items) met filter op status, een formulier om een nieuwe bron toe te
+  voegen, en per rij een handmatige status-override.
+- `GET /admin/items` — itemsoverzicht met filters (bron, minimale score,
+  laatste 7/30 dagen) en paginering (50 per pagina).
+- `GET/POST /admin/items/batch-add` — plak meerdere URL's (één per regel);
+  elke URL wordt opgehaald, van HTML ontdaan en gescoord via dezelfde
+  `score_and_store()`-functie die ook achter `POST /score` zit. Toont per
+  URL succes (titel + score) of falen (reden).
+
 ## Bronbeheer: instroom en krimp
 
 Er is geen vaste bronnenlijst. Bronnen ontstaan op drie manieren:

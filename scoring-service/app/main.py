@@ -2,18 +2,30 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
+from starlette.middleware.sessions import SessionMiddleware
 
-from app import discovery, models, schemas
+from app import admin, discovery, models, schemas
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.embeddings import EmbeddingProvider, get_embedding_provider
-from app.scoring import compute_relevance_score, summarize
+from app.scoring import score_and_store
 
 app = FastAPI(title="Security Trendwatch Agent — Scoring Service")
+app.add_middleware(SessionMiddleware, secret_key=settings.session_secret_key)
 
 # Idempotent: create_all only creates tables that don't exist yet.
 Base.metadata.create_all(bind=engine)
+
+admin.register(app)
+
+
+@app.get("/health")
+def health(db: Session = Depends(get_db)) -> dict:
+    """Used by the Docker healthcheck — a real DB round-trip, not just "process is up"."""
+    db.execute(text("SELECT 1"))
+    return {"status": "ok"}
 
 
 @app.post("/score", response_model=schemas.ScoreResponse)
@@ -22,37 +34,21 @@ def score_item(
     db: Session = Depends(get_db),
     provider: EmbeddingProvider = Depends(get_embedding_provider),
 ) -> schemas.ScoreResponse:
-    source_ref = None
-    if payload.source_id is not None:
-        source_ref = db.get(models.Source, payload.source_id)
-        if source_ref is None:
-            raise HTTPException(status_code=404, detail=f"Source {payload.source_id} not found")
+    if payload.source_id is not None and db.get(models.Source, payload.source_id) is None:
+        raise HTTPException(status_code=404, detail=f"Source {payload.source_id} not found")
 
-    summary = summarize(payload.raw_content)
-    embedding = provider.embed(payload.raw_content)
-    relevance_score = compute_relevance_score(db, embedding, user_id=settings.default_user_id)
-
-    item = models.Item(
-        user_id=settings.default_user_id,
+    item = score_and_store(
+        db,
+        provider,
         source=payload.source,
-        source_id=payload.source_id,
         title=payload.title,
         url=payload.url,
         raw_content=payload.raw_content,
-        summary=summary,
-        embedding=embedding,
-        relevance_score=relevance_score,
+        source_id=payload.source_id,
+        user_id=settings.default_user_id,
     )
-    db.add(item)
-    db.commit()
-    db.refresh(item)
 
-    if source_ref is not None:
-        discovery.update_running_avg_score(db, source_ref, relevance_score)
-
-    discovery.register_discovered_sources(db, payload.raw_content)
-
-    return schemas.ScoreResponse(item_id=item.id, summary=summary, relevance_score=relevance_score)
+    return schemas.ScoreResponse(item_id=item.id, summary=item.summary, relevance_score=item.relevance_score)
 
 
 def _record_feedback(db: Session, item_id: int, label: str) -> models.Item | None:
@@ -123,19 +119,9 @@ def create_source(
     payload: schemas.SourceCreate,
     db: Session = Depends(get_db),
 ) -> models.Source:
-    existing = db.query(models.Source).filter(models.Source.url == payload.url).first()
-    if existing is not None:
+    source = discovery.create_source(db, payload.url, payload.type, payload.discovery_method)
+    if source is None:
         raise HTTPException(status_code=409, detail=f"Source with url {payload.url!r} already exists")
-
-    source = models.Source(
-        url=payload.url,
-        type=payload.type,
-        status="kandidaat",
-        discovery_method=payload.discovery_method,
-    )
-    db.add(source)
-    db.commit()
-    db.refresh(source)
     return source
 
 

@@ -1,5 +1,7 @@
+import secrets
 from typing import Literal
 
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +28,25 @@ class Settings(BaseSettings):
     source_deactivation_window: int = 10
     source_deactivation_min_negative: int = 8
     source_deactivation_avg_score_threshold: float = 0.3
+
+    # Local admin GUI (/admin/*). Single fixed account, session cookie auth —
+    # deliberately no OAuth/JWT, this never leaves the local network.
+    admin_username: str = "admin"
+    # Bcrypt hash, never plaintext. Generate one with scripts/hash_admin_password.py.
+    admin_password_hash: str = ""
+    # Signs the session cookie. If left unset in .env, a random key is
+    # generated per process start — safe by default, but existing sessions
+    # won't survive a restart. Set a fixed value in .env for persistent
+    # sessions across restarts/deploys.
+    session_secret_key: str = Field(default_factory=lambda: secrets.token_hex(32))
+
+    @field_validator("session_secret_key", mode="after")
+    @classmethod
+    def _generate_secret_if_blank(cls, value: str) -> str:
+        # An explicit-but-empty SESSION_SECRET_KEY= in .env parses as "" and
+        # would otherwise override the default_factory with an empty,
+        # forgeable session-signing key.
+        return value or secrets.token_hex(32)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
