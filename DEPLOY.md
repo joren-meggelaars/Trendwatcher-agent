@@ -48,6 +48,12 @@ docker compose run --rm scoring-service python -c "import secrets; print(secrets
 
 Zet beide outputs in `.env` als `ADMIN_PASSWORD_HASH` en `SESSION_SECRET_KEY`.
 
+**Let op**: verdubbel elke `$` in de bcrypt-hash naar `$$` (bijv. `$2b$12$...`
+wordt `$$2b$$12$$...`). Docker Compose interpreteert `$naam` in `.env`-
+waarden zelf als een variabele-verwijzing; zonder deze escaping wordt de
+hash stilzwijgend kapotgemaakt (`WARN ... variable is not set`) en kun je
+niet inloggen op de admin-GUI.
+
 ## 4. Starten
 
 ```bash
