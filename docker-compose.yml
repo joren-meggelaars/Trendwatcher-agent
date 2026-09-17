@@ -1,0 +1,90 @@
+networks:
+  trendwatch-net:
+    driver: bridge
+
+volumes:
+  trendwatch_pgdata:
+
+services:
+  postgres:
+    # Plain postgres:18 has no pgvector extension; app/models.py's
+    # EmbeddingVector column needs it on Postgres. pgvector/pgvector:pg18 is
+    # the official postgres:18 image plus pgvector pre-built — same base,
+    # same data-directory layout, nothing else changes.
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      # Postgres 18 moved PGDATA to /var/lib/postgresql/18/docker and the
+      # image's VOLUME declaration moved up to the parent /var/lib/postgresql
+      # (which it pre-creates with the right permissions) — mount the named
+      # volume there, NOT at the old .../data path, or the container exits
+      # immediately on first start.
+      - trendwatch_pgdata:/var/lib/postgresql
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - trendwatch-net
+
+  scoring-service:
+    build:
+      context: ./scoring-service
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY}
+      VOYAGE_MODEL: ${VOYAGE_MODEL:-voyage-3}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-voyage}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
+      DEFAULT_USER_ID: ${DEFAULT_USER_ID:-joren}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH}
+      SESSION_SECRET_KEY: ${SESSION_SECRET_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      # Reachable only from the VM's own (LAN-facing) network interface, not
+      # every interface on the box — set BIND_ADDRESS in .env to that
+      # interface's IP. A separate reverse proxy (out of scope here) handles
+      # any access from outside the local network.
+      - "${BIND_ADDRESS}:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - trendwatch-net
+
+  scheduler:
+    build:
+      context: ./scheduler
+    restart: unless-stopped
+    environment:
+      SCORING_SERVICE_URL: http://scoring-service:8000
+      GRAPH_TENANT_ID: ${GRAPH_TENANT_ID}
+      GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID}
+      GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET}
+      DIGEST_MAILBOX: ${DIGEST_MAILBOX}
+      DIGEST_TO_EMAIL: ${DIGEST_TO_EMAIL}
+      DIGEST_DRY_RUN: ${DIGEST_DRY_RUN:-true}
+      DIGEST_HOUR: ${DIGEST_HOUR:-7}
+      DISCOVERY_DAY: ${DISCOVERY_DAY:-mon}
+      DISCOVERY_HOUR: ${DISCOVERY_HOUR:-8}
+      SEARCH_PROVIDER: ${SEARCH_PROVIDER:-}
+      SEARCH_API_KEY: ${SEARCH_API_KEY:-}
+    depends_on:
+      scoring-service:
+        condition: service_healthy
+    networks:
+      - trendwatch-net
