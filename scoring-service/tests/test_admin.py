@@ -121,3 +121,79 @@ def test_batch_add_flags_a_non_http_url_without_crashing(admin_client):
     resp = admin_client.post("/admin/items/batch-add", data={"urls": "not-a-url"})
     assert resp.status_code == 200
     assert "Ongeldige URL" in resp.text
+
+
+def test_settings_page_shows_defaults_when_unauthenticated_redirects(client):
+    resp = client.get("/admin/settings", follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/admin/login"
+
+
+def test_settings_page_shows_current_values(admin_client):
+    resp = admin_client.get("/admin/settings")
+    assert resp.status_code == 200
+    assert 'value="7"' in resp.text  # default digest_hour
+    assert 'value="5"' in resp.text  # default digest_top_n
+
+
+def test_settings_update_persists_and_clamps_out_of_range_values(admin_client):
+    resp = admin_client.post(
+        "/admin/settings",
+        data={"digest_hour": "9", "digest_top_n": "8"},
+    )
+    assert resp.status_code == 200
+    assert "Instellingen opgeslagen" in resp.text
+    assert 'value="9"' in resp.text
+    assert 'value="8"' in resp.text
+
+    # Out-of-range values get clamped, not rejected with a 500/422.
+    resp = admin_client.post(
+        "/admin/settings",
+        data={"digest_hour": "99", "digest_top_n": "0"},
+    )
+    assert resp.status_code == 200
+    assert 'value="23"' in resp.text  # clamped to max
+    assert 'value="1"' in resp.text  # clamped to min
+
+    check_resp = admin_client.get("/settings/digest")
+    assert check_resp.json()["digest_hour"] == 23
+    assert check_resp.json()["digest_top_n"] == 1
+
+
+def test_send_now_relays_to_scheduler_and_reports_success(admin_client, monkeypatch):
+    import app.admin as admin_module
+
+    captured = {}
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+    def _fake_post(url, timeout):
+        captured["url"] = url
+        return _FakeResponse()
+
+    monkeypatch.setattr(admin_module.httpx, "post", _fake_post)
+    monkeypatch.setattr(admin_module.settings, "scheduler_url", "http://scheduler:8001")
+
+    resp = admin_client.post("/admin/settings/send-now")
+
+    assert resp.status_code == 200
+    assert captured["url"] == "http://scheduler:8001/trigger/daily-digest"
+    assert "Digest-run gestart" in resp.text
+
+
+def test_send_now_shows_error_when_scheduler_unreachable(admin_client, monkeypatch):
+    import httpx
+
+    import app.admin as admin_module
+
+    def _fake_post(url, timeout):
+        raise httpx.ConnectError("connection failed", request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(admin_module.httpx, "post", _fake_post)
+
+    resp = admin_client.post("/admin/settings/send-now")
+
+    assert resp.status_code == 200
+    assert "Kon de scheduler niet bereiken" in resp.text
