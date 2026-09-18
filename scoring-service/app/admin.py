@@ -17,7 +17,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app import discovery, models
+from app import digest_settings, discovery, models
 from app.auth import NotAuthenticated, SESSION_KEY, require_admin_session, verify_admin_credentials
 from app.config import settings
 from app.database import get_db
@@ -281,6 +281,58 @@ def batch_add_submit(
         )
 
     return templates.TemplateResponse(request, "batch_add.html", {"results": results})
+
+
+# --- digest settings + manual trigger ---------------------------------
+
+
+@router.get("/settings")
+def settings_form(
+    request: Request,
+    db: Session = Depends(get_db),
+    _admin: None = Depends(require_admin_session),
+):
+    current = digest_settings.get_digest_settings(db)
+    return templates.TemplateResponse(request, "settings.html", {"settings": current, "sent": None, "error": None})
+
+
+@router.post("/settings")
+def settings_submit(
+    request: Request,
+    digest_hour: int = Form(...),
+    digest_top_n: int = Form(...),
+    db: Session = Depends(get_db),
+    _admin: None = Depends(require_admin_session),
+):
+    digest_hour = max(0, min(23, digest_hour))
+    digest_top_n = max(1, min(50, digest_top_n))
+    current = digest_settings.update_digest_settings(db, digest_hour, digest_top_n)
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {"settings": current, "sent": None, "error": None, "saved": True},
+    )
+
+
+@router.post("/settings/send-now")
+def send_digest_now(
+    request: Request,
+    db: Session = Depends(get_db),
+    _admin: None = Depends(require_admin_session),
+):
+    current = digest_settings.get_digest_settings(db)
+    sent = None
+    error = None
+    try:
+        resp = httpx.post(f"{settings.scheduler_url}/trigger/daily-digest", timeout=10.0)
+        resp.raise_for_status()
+        sent = "Digest-run gestart — check over enkele ogenblikken je mailbox (of de scheduler-logs bij DIGEST_DRY_RUN)."
+    except httpx.HTTPError as exc:
+        error = f"Kon de scheduler niet bereiken op {settings.scheduler_url}: {exc}"
+
+    return templates.TemplateResponse(
+        request, "settings.html", {"settings": current, "sent": sent, "error": error},
+    )
 
 
 def _handle_not_authenticated(request: Request, exc: NotAuthenticated) -> RedirectResponse:

@@ -80,6 +80,21 @@ class Item(Base):
     source_ref: Mapped["Source | None"] = relationship(back_populates="items")
 
 
+class DigestSettings(Base):
+    """Single-row table (id is always 1) holding the digest tuning knobs the
+    admin GUI can edit at runtime, so changing them doesn't require touching
+    .env / restarting the scheduler container. The scheduler reads this via
+    GET /settings/digest instead of only trusting its own static env vars.
+    """
+
+    __tablename__ = "digest_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    digest_hour: Mapped[int] = mapped_column(Integer, default=7)
+    digest_top_n: Mapped[int] = mapped_column(Integer, default=5)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
 class Feedback(Base):
     __tablename__ = "feedback"
 

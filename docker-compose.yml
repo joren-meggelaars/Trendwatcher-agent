@@ -48,6 +48,9 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME}
       ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH}
       SESSION_SECRET_KEY: ${SESSION_SECRET_KEY}
+      # Internal-only — the scheduler's trigger server, for the admin GUI's
+      # "verstuur nu" button. Reachable via the shared network, not the host.
+      SCHEDULER_URL: http://scheduler:${TRIGGER_SERVER_PORT:-8001}
     depends_on:
       postgres:
         condition: service_healthy
@@ -91,6 +94,12 @@ services:
       DISCOVERY_RESULTS_PER_TERM: ${DISCOVERY_RESULTS_PER_TERM:-5}
       SEARCH_PROVIDER: ${SEARCH_PROVIDER:-}
       SEARCH_API_KEY: ${SEARCH_API_KEY:-}
+      MAILBOX_INGEST_ENABLED: ${MAILBOX_INGEST_ENABLED:-false}
+      MAILBOX_INGEST_FOLDER: ${MAILBOX_INGEST_FOLDER:-inbox}
+      MAILBOX_INGEST_MAX_MESSAGES: ${MAILBOX_INGEST_MAX_MESSAGES:-25}
+      MAILBOX_INGEST_HOUR: ${MAILBOX_INGEST_HOUR:-6}
+      TRIGGER_SERVER_PORT: ${TRIGGER_SERVER_PORT:-8001}
+      SETTINGS_SYNC_INTERVAL_SECONDS: ${SETTINGS_SYNC_INTERVAL_SECONDS:-300}
     depends_on:
       scoring-service:
         condition: service_healthy

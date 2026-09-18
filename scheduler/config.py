@@ -52,6 +52,31 @@ DISCOVERY_RESULTS_PER_TERM = int(os.environ.get("DISCOVERY_RESULTS_PER_TERM", "5
 SEARCH_PROVIDER = os.environ.get("SEARCH_PROVIDER", "").strip().lower()
 SEARCH_API_KEY = os.environ.get("SEARCH_API_KEY", "")
 
+# --- mailbox_ingest ---
+# Reads unread mail from DIGEST_MAILBOX (same mailbox the digest is sent
+# from) via Graph and scores each message, for newsletter-only sources that
+# have no RSS feed at all (tl;dr sec, Risky Business News, SANS NewsBites, ...).
+# Off by default: sending mail (Mail.Send) and reading it (Mail.Read) are
+# separate Graph application permissions, so enabling this requires granting
+# Mail.Read admin consent too, not just having DIGEST_MAILBOX set.
+MAILBOX_INGEST_ENABLED = os.environ.get("MAILBOX_INGEST_ENABLED", "false").strip().lower() not in (
+    "false", "0", "no",
+)
+MAILBOX_INGEST_FOLDER = os.environ.get("MAILBOX_INGEST_FOLDER", "inbox")
+MAILBOX_INGEST_MAX_MESSAGES = int(os.environ.get("MAILBOX_INGEST_MAX_MESSAGES", "25"))
+MAILBOX_INGEST_HOUR = int(os.environ.get("MAILBOX_INGEST_HOUR", "6"))
+
+# --- internal trigger server ---
+# Lets the admin GUI (scoring-service) POST /trigger/daily-digest for the
+# "verstuur nu" button. Only bound for reachability over the shared Docker
+# network — never published to the host in docker-compose.yml.
+TRIGGER_SERVER_PORT = int(os.environ.get("TRIGGER_SERVER_PORT", "8001"))
+
+# How often (seconds) main.py re-checks GET /settings/digest on the
+# scoring-service for a changed DIGEST_HOUR and reschedules the APScheduler
+# job accordingly, so an admin-GUI change takes effect without a restart.
+SETTINGS_SYNC_INTERVAL_SECONDS = int(os.environ.get("SETTINGS_SYNC_INTERVAL_SECONDS", "300"))
+
 _seen_items_path = os.environ.get("SEEN_ITEMS_PATH", "").strip()
 SEEN_ITEMS_PATH = (
     Path(_seen_items_path) if _seen_items_path else Path(__file__).resolve().parent / "data" / "seen_items.json"

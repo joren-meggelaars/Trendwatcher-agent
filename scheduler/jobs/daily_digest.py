@@ -15,6 +15,7 @@ import httpx
 
 import config
 from graph_client import get_graph_token
+from remote_settings import fetch_digest_settings
 from seen_items import SeenItemsCache
 
 DIGEST_SUBJECT = "Security Trendwatch — dagelijkse digest"
@@ -199,7 +200,8 @@ def run() -> None:
             logger.info("Geen nieuwe items gevonden in de actieve bronnen.")
             return
 
-        top_items = sorted(scored_items, key=lambda i: i["relevance_score"], reverse=True)[: config.DIGEST_TOP_N]
+        digest_top_n = fetch_digest_settings()["digest_top_n"]
+        top_items = sorted(scored_items, key=lambda i: i["relevance_score"], reverse=True)[:digest_top_n]
         send_digest(build_digest_html(top_items))
 
 

@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     # sessions across restarts/deploys.
     session_secret_key: str = Field(default_factory=lambda: secrets.token_hex(32))
 
+    # Base URL of the scheduler's small internal trigger server (see
+    # scheduler/trigger_server.py), used only by the admin GUI's "verstuur nu"
+    # button. Reachable via the shared Docker network, not published to the
+    # host — never exposed to the internet.
+    scheduler_url: str = "http://scheduler:8001"
+
     @field_validator("session_secret_key", mode="after")
     @classmethod
     def _generate_secret_if_blank(cls, value: str) -> str:

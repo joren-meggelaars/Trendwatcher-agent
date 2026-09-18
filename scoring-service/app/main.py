@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import admin, discovery, models, schemas
+from app import admin, digest_settings, discovery, models, schemas
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.embeddings import EmbeddingProvider, get_embedding_provider
@@ -147,3 +147,16 @@ def evaluate_source(source_id: int, db: Session = Depends(get_db)) -> models.Sou
 @app.post("/sources/evaluate-all", response_model=list[schemas.SourceStatusChange])
 def evaluate_all_sources(db: Session = Depends(get_db)) -> list[dict]:
     return discovery.evaluate_all_sources(db)
+
+
+@app.get("/settings/digest", response_model=schemas.DigestSettingsResponse)
+def get_digest_settings_endpoint(db: Session = Depends(get_db)) -> models.DigestSettings:
+    return digest_settings.get_digest_settings(db)
+
+
+@app.put("/settings/digest", response_model=schemas.DigestSettingsResponse)
+def update_digest_settings_endpoint(
+    payload: schemas.DigestSettingsUpdate,
+    db: Session = Depends(get_db),
+) -> models.DigestSettings:
+    return digest_settings.update_digest_settings(db, payload.digest_hour, payload.digest_top_n)

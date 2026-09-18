@@ -35,13 +35,43 @@ cp .env.example .env
   **Zonder geconfigureerde `SearchProvider` slaat de zoekstap netjes over**
   (met een warning-log) — de rest van de job (ophalen, distilleren,
   evaluate-all) draait gewoon door.
+- **`jobs/mailbox_ingest.py`** — voor bronnen zonder RSS-feed, alleen een
+  nieuwsbrief (tl;dr sec, Risky Business News, SANS NewsBites). Leest
+  ongelezen mail uit `DIGEST_MAILBOX` via Graph, maakt per afzender één
+  `"mailbox"`-Source aan (`mailto:afzender@voorbeeld.com`, dedup op URL zoals
+  elke andere bron), scoort elk bericht en markeert het daarna als gelezen
+  (Graph's eigen `isRead`-vlag is de "al verwerkt"-status — geen aparte
+  lokale seen-cache nodig). **Staat standaard uit** (`MAILBOX_INGEST_ENABLED=false`):
+  vereist naast `Mail.Send` ook applicatiepermissie `Mail.Read` (admin
+  consent) op de Graph-appregistratie.
 
-Beide jobs zijn los aan te roepen, zonder de scheduler-loop:
+Alle drie de jobs zijn los aan te roepen, zonder de scheduler-loop:
 
 ```bash
 uv run python -m jobs.daily_digest
 uv run python -m jobs.weekly_discovery
+uv run python -m jobs.mailbox_ingest
 ```
+
+## Digest-instellingen aanpasbaar via de admin-GUI
+
+`DIGEST_HOUR` en `DIGEST_TOP_N` liggen niet meer alleen vast in `.env` — de
+admin-GUI van de scoring-service (`/admin/settings`) kan ze via
+`GET`/`PUT /settings/digest` aanpassen, opgeslagen in de Postgres-database:
+
+- `digest_top_n` wordt bij elke `daily_digest`-run vers opgehaald
+  (`remote_settings.fetch_digest_settings()`), dus een wijziging geldt vanaf
+  de eerstvolgende run.
+- `digest_hour` bepaalt de APScheduler-cron-trigger; een achtergrondtaak
+  (`sync_digest_schedule`, elke `SETTINGS_SYNC_INTERVAL_SECONDS`, standaard 5
+  minuten) checkt op wijzigingen en herplant de job — geen herstart nodig.
+- De "verstuur nu"-knop in de admin-GUI doet een `POST` naar
+  `trigger_server.py`'s interne `/trigger/daily-digest`-endpoint (alleen
+  bereikbaar binnen het Docker-netwerk, nooit naar de host/internet
+  gepubliceerd), die de digest-job direct op de achtergrond start.
+
+Als de scoring-service niet bereikbaar is, valt elke job terug op de
+statische `DIGEST_HOUR`/`DIGEST_TOP_N`-waarden uit `.env`.
 
 ## Scheduler draaien
 

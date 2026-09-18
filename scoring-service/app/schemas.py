@@ -1,10 +1,10 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 SourceStatus = Literal["kandidaat", "actief", "gedeactiveerd"]
-DiscoveryMethod = Literal["seed", "link_following", "market_sweep", "manual"]
+DiscoveryMethod = Literal["seed", "link_following", "market_sweep", "manual", "mailbox"]
 FeedbackLabel = Literal["interessant", "niet_interessant"]
 
 
@@ -61,3 +61,16 @@ class SourceStatusChange(BaseModel):
     url: str
     old_status: SourceStatus
     new_status: SourceStatus
+
+
+class DigestSettingsResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    digest_hour: int
+    digest_top_n: int
+    updated_at: datetime
+
+
+class DigestSettingsUpdate(BaseModel):
+    digest_hour: int = Field(ge=0, le=23)
+    digest_top_n: int = Field(ge=1, le=50)
