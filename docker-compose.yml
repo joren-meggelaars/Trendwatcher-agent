@@ -4,6 +4,10 @@ networks:
 
 volumes:
   trendwatch_pgdata:
+  # The scheduler's "already scored" cache (seen_items.json). Without this it
+  # lives in the container's own layer and is lost on every rebuild/recreate,
+  # after which the next run re-scores every entry still in the feeds.
+  trendwatch_scheduler_data:
 
 services:
   postgres:
@@ -104,6 +108,9 @@ services:
       MANUAL_DIGEST_LOOKBACK_DAYS: ${MANUAL_DIGEST_LOOKBACK_DAYS:-7}
       TRIGGER_SERVER_PORT: ${TRIGGER_SERVER_PORT:-8001}
       SETTINGS_SYNC_INTERVAL_SECONDS: ${SETTINGS_SYNC_INTERVAL_SECONDS:-300}
+      SEEN_ITEMS_PATH: /app/data/seen_items.json
+    volumes:
+      - trendwatch_scheduler_data:/app/data
     depends_on:
       scoring-service:
         condition: service_healthy

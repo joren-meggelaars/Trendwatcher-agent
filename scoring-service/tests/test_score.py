@@ -1,4 +1,5 @@
 from app.embeddings import FakeEmbeddingProvider
+from uuid import uuid4
 
 NETWORK_A = (
     "Critical vulnerability discovered in Cisco router firmware allows remote "
@@ -17,7 +18,7 @@ PHISHING = (
 def _score(client, raw_content: str, title: str = "T"):
     resp = client.post(
         "/score",
-        json={"source": "test", "title": title, "url": "http://example.com", "raw_content": raw_content},
+        json={"source": "test", "title": title, "url": f"http://example.com/{uuid4().hex}", "raw_content": raw_content},
     )
     assert resp.status_code == 200
     return resp.json()

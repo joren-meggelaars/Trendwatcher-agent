@@ -115,3 +115,28 @@ def test_top_items_empty_database_returns_empty_list(client):
 def test_top_items_rejects_out_of_range_parameters(client):
     assert client.get("/items/top", params={"limit": 0}).status_code == 422
     assert client.get("/items/top", params={"days": 0}).status_code == 422
+
+
+def test_scoring_the_same_url_twice_returns_the_existing_item_without_embedding(client, monkeypatch):
+    import app.main as main_module
+
+    first = _score(client, "same link")
+
+    calls = []
+    real_embed = main_module.get_embedding_provider
+
+    def _counting_provider():
+        provider = real_embed()
+        original = provider.embed
+        provider.embed = lambda text: calls.append(text) or original(text)
+        return provider
+
+    client.app.dependency_overrides[main_module.get_embedding_provider] = _counting_provider
+    try:
+        second = _score(client, "same link")
+    finally:
+        client.app.dependency_overrides.pop(main_module.get_embedding_provider, None)
+
+    assert second["item_id"] == first["item_id"]
+    assert calls == []  # no embedding request for an already-stored URL
+    assert len(client.get("/items/top", params={"limit": 50}).json()) == 1

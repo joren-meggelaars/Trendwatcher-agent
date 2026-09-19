@@ -1,7 +1,10 @@
+from uuid import uuid4
+
+
 def _score(client, raw_content: str = "Some security article content."):
     resp = client.post(
         "/score",
-        json={"source": "test", "title": "T", "url": "http://example.com", "raw_content": raw_content},
+        json={"source": "test", "title": "T", "url": f"http://example.com/{uuid4().hex}", "raw_content": raw_content},
     )
     assert resp.status_code == 200
     return resp.json()

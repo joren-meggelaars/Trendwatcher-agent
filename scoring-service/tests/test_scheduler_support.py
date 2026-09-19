@@ -2,9 +2,11 @@
 GET /feedback-link, GET /items/recent-feedback, POST /sources/evaluate-all.
 """
 
+from uuid import uuid4
+
 
 def _score(client, raw_content: str = "Some security article content.", source_id: int | None = None) -> dict:
-    payload = {"source": "test", "title": "T", "url": "http://example.com", "raw_content": raw_content}
+    payload = {"source": "test", "title": "T", "url": f"http://example.com/{uuid4().hex}", "raw_content": raw_content}
     if source_id is not None:
         payload["source_id"] = source_id
     resp = client.post("/score", json=payload)

@@ -151,3 +151,48 @@ docker compose pull && docker compose up -d --build   # updaten na een git pull
 
 `restart: unless-stopped` op alle drie de services zorgt dat ze na een
 VM-reboot vanzelf weer opstarten zodra de Docker-daemon draait.
+
+### Scheduler-cache ("al gescoord")
+
+De scheduler onthoudt per bron welke feed-items al gescoord zijn in
+`seen_items.json`. Die staat in het volume `trendwatch_scheduler_data`, zodat
+een rebuild hem niet kwijtraakt (anders scoort de eerstvolgende run alles
+opnieuw en krijg je duplicaten). Let op: `docker compose down -v` wist dit
+volume óók.
+
+De allereerste keer dat je dit volume introduceert is het leeg. De scoring-
+service herkent al opgeslagen URL's en maakt dan geen duplicaat, maar de
+scheduler wacht per item nog wel `SCORE_REQUEST_DELAY_SECONDS`. Wil je dat
+overslaan, kopieer dan vóór de update de oude cache uit de draaiende
+container en zet hem er daarna in terug:
+
+```bash
+docker compose cp scheduler:/app/data/seen_items.json /tmp/seen_items.json   # vóór de update
+# ... git pull && docker compose build && docker compose up -d ...
+docker compose cp /tmp/seen_items.json scheduler:/app/data/seen_items.json
+docker compose exec -u root scheduler chown app:app /app/data/seen_items.json
+```
+
+(Bestaat het bestand nog niet, dan geeft de eerste `cp` een foutmelding — dan
+valt er niets over te zetten.)
+
+### Items terugbrengen tot een startset
+
+Items worden nergens automatisch opgeruimd. Voor een bewuste nieuwe start:
+`scripts/trim_items.py` houdt N items over (standaard 50): eerst items met
+feedback, dan marktontwikkeling, dan de nieuwste. Het draait **niet**
+automatisch bij een build, en is standaard een dry-run.
+
+```bash
+# 1. back-up (verwijderen kan niet ongedaan gemaakt worden)
+docker compose exec postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > ~/trendwatch-backup.sql
+
+# 2. dry-run: toont wat blijft en wat weggaat, verwijdert niets
+docker compose run --rm scoring-service python -m scripts.trim_items
+
+# 3. echt verwijderen
+docker compose run --rm scoring-service python -m scripts.trim_items --apply
+```
+
+Verwijderde items komen niet terug: de scheduler-cache markeert ze als al
+gezien, dus alleen nieuwe feed-items komen erbij.

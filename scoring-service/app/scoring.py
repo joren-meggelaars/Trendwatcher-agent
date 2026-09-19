@@ -62,7 +62,21 @@ def score_and_store(
     Callers are responsible for any source_id validation appropriate to their
     context (e.g. POST /score returns 404 for an unknown id; batch-add never
     passes one) — this only does the scoring/storage/discovery side effects.
+
+    Idempotent per (user, url): an already-stored URL returns the existing
+    item untouched — no second row, no embedding call (free-tier Voyage is
+    3 req/min). This keeps a lost scheduler "seen" cache (or re-adding a link
+    in the admin GUI) from piling up duplicates.
     """
+    existing = (
+        db.query(models.Item)
+        .filter(models.Item.user_id == user_id, models.Item.url == url)
+        .order_by(models.Item.id)
+        .first()
+    )
+    if existing is not None:
+        return existing
+
     summary = summarize(raw_content)
     embedding = provider.embed(raw_content)
     relevance_score = compute_relevance_score(db, embedding, user_id=user_id)

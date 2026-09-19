@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 NETWORK_TEMPLATES = [
     "Critical vulnerability discovered in Cisco router firmware allows remote code execution.",
     "Cisco router firmware vulnerability lets attackers execute remote code without authentication.",
@@ -30,7 +32,7 @@ def _score(client, raw_content: str, source_id: int | None = None, title: str = 
     payload = {
         "source": "test",
         "title": title,
-        "url": "http://example.com",
+        "url": f"http://example.com/{uuid4().hex}",
         "raw_content": raw_content,
     }
     if source_id is not None:

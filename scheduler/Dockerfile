@@ -21,6 +21,11 @@ RUN groupadd --system app && useradd --system --gid app --home-dir /app --shell 
 WORKDIR /app
 COPY --from=builder --chown=app:app /app /app
 
+# Mount point for the seen-items cache volume (see docker-compose.yml). Must
+# exist and be owned by app in the image: a fresh named volume inherits the
+# ownership of the directory it is mounted over, and the process is not root.
+RUN mkdir -p /app/data && chown app:app /app/data
+
 USER app
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1
