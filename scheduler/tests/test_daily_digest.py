@@ -265,10 +265,80 @@ def test_run_now_mails_top_items_without_scoring(monkeypatch):
     daily_digest.run_now()
 
     assert captured["url"].endswith("/items/top")
-    assert captured["params"] == {"days": config.MANUAL_DIGEST_LOOKBACK_DAYS, "limit": 3}
+    assert captured["params"] == {
+        "days": config.MANUAL_DIGEST_LOOKBACK_DAYS,
+        "limit": 3,
+        "category": "markt",  # digest carries market developments only
+    }
     assert "Kritieke bug" in captured["html"]
     assert "example.com</a>" in captured["html"]  # derived source name
     assert "item_id=7&amp;label=interessant" in captured["html"]
+
+
+class _FakeSeen:
+    def mark_seen(self, source_id, link) -> None:
+        pass
+
+    def save(self) -> None:
+        pass
+
+
+def _patch_run(monkeypatch, scored, top_n=5):
+    sent = []
+    entries = [
+        {"title": f"t{i}", "link": f"https://example.com/{i}", "raw_content": "x", "source_name": "S"}
+        for i in range(len(scored))
+    ]
+    results = iter(scored)
+
+    # A local .env may set a real delay (Voyage free tier) — never sleep in tests.
+    monkeypatch.setattr(config, "SCORE_REQUEST_DELAY_SECONDS", 0)
+    monkeypatch.setattr(daily_digest.SeenItemsCache, "load", classmethod(lambda cls: _FakeSeen()))
+    monkeypatch.setattr(daily_digest, "fetch_active_sources", lambda client: [_SOURCE])
+    monkeypatch.setattr(daily_digest, "fetch_new_entries", lambda source, seen: entries)
+    monkeypatch.setattr(daily_digest, "score_entry", lambda client, entry, source: next(results))
+    monkeypatch.setattr(daily_digest, "fetch_digest_settings", lambda: {"digest_top_n": top_n})
+    monkeypatch.setattr(daily_digest, "send_digest", lambda html_body: sent.append(html_body))
+    return sent
+
+
+def _scored(item_id, category, score):
+    return {
+        **_DIGEST_ITEM,
+        "item_id": item_id,
+        "title": f"item {item_id}",
+        "category": category,
+        "relevance_score": score,
+    }
+
+
+def test_run_keeps_only_market_items_even_when_news_scores_higher(monkeypatch):
+    sent = _patch_run(
+        monkeypatch,
+        [
+            _scored(1, "nieuws", 0.95),
+            _scored(2, "markt", 0.6),
+            _scored(3, "nieuws", 0.9),
+            _scored(4, "markt", 0.7),
+        ],
+        top_n=2,
+    )
+
+    daily_digest.run()
+
+    assert len(sent) == 1
+    body = sent[0]
+    assert "item 4" in body and "item 2" in body
+    assert "item 1" not in body and "item 3" not in body
+    assert body.index("item 4") < body.index("item 2")  # highest market score first
+
+
+def test_run_sends_nothing_when_no_item_is_market_development(monkeypatch):
+    sent = _patch_run(monkeypatch, [_scored(1, "nieuws", 0.9), _scored(2, "nieuws", 0.8)])
+
+    daily_digest.run()
+
+    assert sent == []
 
 
 def test_run_now_sends_nothing_when_no_items(monkeypatch):

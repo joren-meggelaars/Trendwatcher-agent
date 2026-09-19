@@ -19,8 +19,11 @@ cp .env.example .env
 
 - **`jobs/daily_digest.py`** — haalt actieve bronnen op
   (`GET /sources?status=actief`), parst hun RSS-feed met `feedparser`, scoort
-  nieuwe items via `POST /score` (met `source_id`), selecteert de top-N op
-  `relevance_score` en verstuurt een HTML-digest met per item twee
+  nieuwe items via `POST /score` (met `source_id`), houdt daarvan **alleen de
+  marktontwikkeling** over (funding, overnames, marktcijfers — de
+  scoring-service geeft elk item een `category` `"markt"`/`"nieuws"` terug, zie
+  `app/classification.py`; gewoon security-nieuws valt buiten de digest),
+  selecteert daaruit de top-N op `relevance_score` en verstuurt een HTML-digest met per item twee
   feedback-links (`GET /feedback-link?item_id=...&label=...`) via de
   Microsoft Graph `sendMail`-API (`POST /users/{DIGEST_MAILBOX}/sendMail`,
   zie `graph_client.py`). Met `DIGEST_DRY_RUN=true` (standaard) wordt de
@@ -69,8 +72,8 @@ admin-GUI van de scoring-service (`/admin/settings`) kan ze via
   `trigger_server.py`'s interne `/trigger/digest-now`-endpoint (alleen
   bereikbaar binnen het Docker-netwerk, nooit naar de host/internet
   gepubliceerd). Die draait `daily_digest.run_now()`: mailt de beste al
-  gescoorde items van de laatste `MANUAL_DIGEST_LOOKBACK_DAYS` dagen (via
-  `GET /items/top` op de scoring-service), **zonder feeds op te halen of te
+  gescoorde marktontwikkeling van de laatste `MANUAL_DIGEST_LOOKBACK_DAYS` dagen (via
+  `GET /items/top?category=markt` op de scoring-service), **zonder feeds op te halen of te
   scoren** — dus geen wachttijd door Voyage's rate limit. Het geplande
   `/trigger/daily-digest` (volledige run: ophalen, scoren, mailen) blijft
   bestaan, maar staat niet achter een knop.

@@ -66,8 +66,8 @@ def test_scoring_an_item_with_unknown_link_registers_candidate_source(client):
         client,
         "Interesting write-up, see https://unknown-domain.example/article for details.",
     )
-    # /score response contract is unchanged by the discovery side-effect.
-    assert set(body.keys()) == {"item_id", "summary", "relevance_score"}
+    # The discovery side-effect doesn't add anything to the /score response.
+    assert set(body.keys()) == {"item_id", "summary", "relevance_score", "category"}
 
     resp = client.get("/sources", params={"status": "kandidaat"})
     urls = {s["url"] for s in resp.json()}

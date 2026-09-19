@@ -57,6 +57,55 @@ def test_top_items_returns_source_url_from_source_or_item_label(client):
     assert by_id[with_source["item_id"]]["title"] == "with source"
 
 
+def test_score_response_includes_category(client):
+    market = _score(client, "Acme raises $50M Series B")
+    news = _score(client, "Critical vulnerability patched in Acme VPN")
+
+    assert market["category"] == "markt"
+    assert news["category"] == "nieuws"
+
+
+def test_top_items_category_filters_before_limit(client, db_session):
+    # The two best-scoring items are news; without filtering-before-limit the
+    # top 2 would contain no market item at all.
+    news_a = _score(client, "Zero-day exploited in Acme firewall")
+    news_b = _score(client, "Ransomware attack hits Acme hospital")
+    market_a = _score(client, "Acme acquires Globex")
+    market_b = _score(client, "Globex raises $20M Series A")
+
+    for item_id, score in (
+        (news_a["item_id"], 0.9),
+        (news_b["item_id"], 0.8),
+        (market_a["item_id"], 0.6),
+        (market_b["item_id"], 0.7),
+    ):
+        db_session.get(models.Item, item_id).relevance_score = score
+    db_session.commit()
+
+    resp = client.get("/items/top", params={"limit": 2, "category": "markt"})
+    assert resp.status_code == 200
+    assert [i["item_id"] for i in resp.json()] == [market_b["item_id"], market_a["item_id"]]
+
+    resp = client.get("/items/top", params={"limit": 2, "category": "nieuws"})
+    assert [i["item_id"] for i in resp.json()] == [news_a["item_id"], news_b["item_id"]]
+
+    # No category -> unchanged behaviour, everything competes.
+    resp = client.get("/items/top", params={"limit": 2})
+    assert [i["item_id"] for i in resp.json()] == [news_a["item_id"], news_b["item_id"]]
+
+
+def test_top_items_category_fewer_matches_than_limit_returns_only_those(client):
+    _score(client, "Zero-day exploited in Acme firewall")
+    market = _score(client, "Acme acquires Globex")
+
+    resp = client.get("/items/top", params={"limit": 5, "category": "markt"})
+    assert [i["item_id"] for i in resp.json()] == [market["item_id"]]
+
+
+def test_top_items_rejects_unknown_category(client):
+    assert client.get("/items/top", params={"category": "sport"}).status_code == 422
+
+
 def test_top_items_empty_database_returns_empty_list(client):
     resp = client.get("/items/top")
     assert resp.status_code == 200

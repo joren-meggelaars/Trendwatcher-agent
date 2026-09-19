@@ -21,6 +21,11 @@ from seen_items import SeenItemsCache
 
 DIGEST_SUBJECT = "Security Trendwatch — dagelijkse digest"
 
+# The digest only carries market developments (funding, overnames,
+# marktcijfers, ...), not plain security news — the scoring-service tags every
+# item with a category (app/classification.py) and this is the one we keep.
+DIGEST_CATEGORY = "markt"
+
 # score_entry retries a failed POST /score up to twice, waiting these many
 # seconds before each retry, before giving up on the item.
 _SCORE_RETRY_DELAYS = (1, 3)
@@ -201,8 +206,17 @@ def run() -> None:
             logger.info("Geen nieuwe items gevonden in de actieve bronnen.")
             return
 
+        market_items = [i for i in scored_items if i.get("category") == DIGEST_CATEGORY]
+        logger.info(
+            "%d van %d nieuwe items zijn marktontwikkeling (de rest is nieuws en valt buiten de digest).",
+            len(market_items), len(scored_items),
+        )
+        if not market_items:
+            logger.info("Geen marktontwikkeling tussen de nieuwe items — geen digest verstuurd.")
+            return
+
         digest_top_n = fetch_digest_settings()["digest_top_n"]
-        top_items = sorted(scored_items, key=lambda i: i["relevance_score"], reverse=True)[:digest_top_n]
+        top_items = sorted(market_items, key=lambda i: i["relevance_score"], reverse=True)[:digest_top_n]
         send_digest(build_digest_html(top_items))
 
 
@@ -227,7 +241,11 @@ def run_now() -> None:
     try:
         resp = httpx.get(
             f"{config.SCORING_SERVICE_URL}/items/top",
-            params={"days": config.MANUAL_DIGEST_LOOKBACK_DAYS, "limit": digest_top_n},
+            params={
+                "days": config.MANUAL_DIGEST_LOOKBACK_DAYS,
+                "limit": digest_top_n,
+                "category": DIGEST_CATEGORY,
+            },
             timeout=30.0,
         )
         resp.raise_for_status()
@@ -238,7 +256,7 @@ def run_now() -> None:
     items = resp.json()
     if not items:
         logger.info(
-            "Geen gescoorde items in de laatste %d dagen — geen digest verstuurd.",
+            "Geen gescoorde marktontwikkeling in de laatste %d dagen — geen digest verstuurd.",
             config.MANUAL_DIGEST_LOOKBACK_DAYS,
         )
         return

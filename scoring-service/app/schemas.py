@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.classification import ItemCategory
+
 SourceStatus = Literal["kandidaat", "actief", "gedeactiveerd"]
 DiscoveryMethod = Literal["seed", "link_following", "market_sweep", "manual", "mailbox"]
 FeedbackLabel = Literal["interessant", "niet_interessant"]
@@ -20,6 +22,7 @@ class ScoreResponse(BaseModel):
     item_id: int
     summary: str
     relevance_score: float
+    category: ItemCategory
 
 
 class FeedbackRequest(BaseModel):

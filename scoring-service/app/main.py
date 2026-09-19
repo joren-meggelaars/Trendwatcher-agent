@@ -3,10 +3,10 @@ from datetime import datetime, timedelta, timezone
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import admin, digest_settings, discovery, models, schemas
+from app import admin, classification, digest_settings, discovery, models, schemas
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.embeddings import EmbeddingProvider, get_embedding_provider
@@ -48,7 +48,12 @@ def score_item(
         user_id=settings.default_user_id,
     )
 
-    return schemas.ScoreResponse(item_id=item.id, summary=item.summary, relevance_score=item.relevance_score)
+    return schemas.ScoreResponse(
+        item_id=item.id,
+        summary=item.summary,
+        relevance_score=item.relevance_score,
+        category=classification.classify(item.title, item.summary or ""),
+    )
 
 
 def _record_feedback(db: Session, item_id: int, label: str) -> models.Item | None:
@@ -118,19 +123,44 @@ def recent_feedback_items(
 def top_items(
     days: int = Query(7, ge=1, le=365),
     limit: int = Query(5, ge=1, le=50),
+    category: schemas.ItemCategory | None = Query(
+        None, description="Only items of this category; omit for all."
+    ),
     db: Session = Depends(get_db),
 ) -> list[schemas.TopItem]:
     """Best already-scored items from the last `days` days, highest score first
     (newest first on ties). Used by the scheduler's "verstuur nu" digest so it
-    can mail immediately instead of re-scoring every feed entry."""
+    can mail immediately instead of re-scoring every feed entry.
+
+    With `category` the split is applied here (see app/classification.py),
+    before `limit`, so the top N is filled with items of that category only."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    items = (
+    query = (
         db.query(models.Item)
         .filter(models.Item.relevance_score.is_not(None), models.Item.created_at >= cutoff)
         .order_by(models.Item.relevance_score.desc(), models.Item.id.desc())
-        .limit(limit)
-        .all()
     )
+    if category is None:
+        items = query.limit(limit).all()
+    else:
+        # Category isn't stored, so classify in Python. Skip the heavy columns
+        # (raw_content, embedding) for the candidates we only inspect.
+        candidates = query.options(
+            load_only(
+                models.Item.id,
+                models.Item.title,
+                models.Item.url,
+                models.Item.summary,
+                models.Item.relevance_score,
+                models.Item.source,
+                models.Item.source_id,
+            )
+        ).all()
+        items = [
+            item
+            for item in candidates
+            if classification.classify(item.title, item.summary or "") == category
+        ][:limit]
     return [
         schemas.TopItem(
             item_id=item.id,
