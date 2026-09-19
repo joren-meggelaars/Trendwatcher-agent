@@ -111,14 +111,14 @@ _DIGEST_ITEM = {
 
 
 def test_build_digest_html_links_article_and_source():
-    html_out = daily_digest.build_digest_html([_DIGEST_ITEM])
+    html_out = daily_digest.build_digest_html({"markt": [_DIGEST_ITEM]})
 
     assert '<a href="https://example.com/article">Kritieke kwetsbaarheid ontdekt</a>' in html_out
     assert '<a href="https://example.com/feed">Example Security Blog</a>' in html_out
 
 
 def test_build_digest_html_uses_thumbs_for_feedback_links():
-    html_out = daily_digest.build_digest_html([_DIGEST_ITEM])
+    html_out = daily_digest.build_digest_html({"markt": [_DIGEST_ITEM]})
 
     assert "\U0001F44D" in html_out  # 👍
     assert "\U0001F44E" in html_out  # 👎
@@ -131,7 +131,7 @@ def test_build_digest_html_feedback_links_use_public_base_url_not_internal_one(m
     monkeypatch.setattr(config, "SCORING_SERVICE_URL", "http://scoring-service:8000")
     monkeypatch.setattr(config, "FEEDBACK_BASE_URL", "http://10.0.100.8:8000")
 
-    html_out = daily_digest.build_digest_html([_DIGEST_ITEM])
+    html_out = daily_digest.build_digest_html({"markt": [_DIGEST_ITEM]})
 
     assert "http://10.0.100.8:8000/feedback-link?item_id=1&amp;label=interessant" in html_out
     assert "scoring-service" not in html_out
@@ -145,7 +145,7 @@ def test_build_digest_html_escapes_untrusted_feed_content():
         "source_name": "<b>Evil</b> Feed",
     }
 
-    html_out = daily_digest.build_digest_html([malicious_item])
+    html_out = daily_digest.build_digest_html({"markt": [malicious_item]})
 
     # The dangerous markup must never appear as live tags/attributes — only
     # as inert, escaped text (so a browser/mail client can't execute it).
@@ -159,7 +159,7 @@ def test_build_digest_html_escapes_untrusted_feed_content():
 def test_build_digest_html_falls_back_to_plain_text_for_non_http_url():
     item = {**_DIGEST_ITEM, "url": "javascript:alert(1)"}
 
-    html_out = daily_digest.build_digest_html([item])
+    html_out = daily_digest.build_digest_html({"markt": [item]})
 
     assert "javascript:" not in html_out
     assert "Kritieke kwetsbaarheid ontdekt" in html_out
@@ -228,20 +228,49 @@ def test_source_name_uses_host_without_www_or_mailto_address():
     assert daily_digest._source_name("mailto:news@tldrsec.com") == "news@tldrsec.com"
 
 
-def _patch_run_now(monkeypatch, items, top_n=5):
-    captured = {"params": None, "html": None}
+def _top_item(item_id, title, score=0.5):
+    return {
+        "item_id": item_id,
+        "title": title,
+        "url": f"https://example.com/{item_id}",
+        "summary": "Samenvatting",
+        "relevance_score": score,
+        "source_url": "https://www.example.com/feed",
+    }
+
+
+def test_build_digest_html_has_a_section_per_category_in_order():
+    html_out = daily_digest.build_digest_html(
+        {"nieuws": [_DIGEST_ITEM | {"title": "Nieuwsitem"}], "markt": [_DIGEST_ITEM | {"title": "Marktitem"}]}
+    )
+
+    assert html_out.index("Marktontwikkeling") < html_out.index("Marktitem")
+    assert html_out.index("Marktitem") < html_out.index("Nieuws</h2>")
+    assert html_out.index("Nieuws</h2>") < html_out.index("Nieuwsitem")
+
+
+def test_build_digest_html_says_so_when_a_category_is_empty():
+    html_out = daily_digest.build_digest_html({"markt": [_DIGEST_ITEM]})
+
+    assert "Nieuws</h2><p>Geen nieuwe items in deze categorie.</p>" in html_out
+
+
+def _patch_run_now(monkeypatch, items_by_category, top_n=5):
+    captured = {"requests": [], "html": None}
 
     class _Resp:
+        def __init__(self, items):
+            self._items = items
+
         def raise_for_status(self) -> None:
             pass
 
         def json(self):
-            return items
+            return [dict(i) for i in self._items]
 
     def _fake_get(url, params, timeout):
-        captured["url"] = url
-        captured["params"] = params
-        return _Resp()
+        captured["requests"].append((url, params))
+        return _Resp(items_by_category.get(params["category"], []))
 
     monkeypatch.setattr(daily_digest.httpx, "get", _fake_get)
     monkeypatch.setattr(daily_digest, "fetch_digest_settings", lambda: {"digest_top_n": top_n})
@@ -249,30 +278,55 @@ def _patch_run_now(monkeypatch, items, top_n=5):
     return captured
 
 
-def test_run_now_mails_top_items_without_scoring(monkeypatch):
-    items = [
-        {
-            "item_id": 7,
-            "title": "Kritieke bug",
-            "url": "https://example.com/bug",
-            "summary": "Samenvatting",
-            "relevance_score": 0.91,
-            "source_url": "https://www.example.com/feed",
-        }
-    ]
-    captured = _patch_run_now(monkeypatch, items, top_n=3)
+def test_run_now_mails_top_items_per_category_without_scoring(monkeypatch):
+    captured = _patch_run_now(
+        monkeypatch,
+        {"markt": [_top_item(7, "Acme overname")], "nieuws": [_top_item(8, "Kritieke bug")]},
+        top_n=3,
+    )
 
     daily_digest.run_now()
 
-    assert captured["url"].endswith("/items/top")
-    assert captured["params"] == {
-        "days": config.MANUAL_DIGEST_LOOKBACK_DAYS,
-        "limit": 3,
-        "category": "markt",  # digest carries market developments only
-    }
-    assert "Kritieke bug" in captured["html"]
-    assert "example.com</a>" in captured["html"]  # derived source name
-    assert "item_id=7&amp;label=interessant" in captured["html"]
+    assert [(url.rsplit("/", 1)[-1], p["category"], p["limit"], p["days"]) for url, p in captured["requests"]] == [
+        ("top", "markt", 3, config.MANUAL_DIGEST_LOOKBACK_DAYS),
+        ("top", "nieuws", 3, config.MANUAL_DIGEST_LOOKBACK_DAYS),
+    ]
+    html_out = captured["html"]
+    assert "Acme overname" in html_out and "Kritieke bug" in html_out
+    assert html_out.index("Acme overname") < html_out.index("Kritieke bug")
+    assert "example.com</a>" in html_out  # derived source name
+    assert "item_id=7&amp;label=interessant" in html_out
+
+
+def test_run_now_still_sends_when_only_one_category_has_items(monkeypatch):
+    captured = _patch_run_now(monkeypatch, {"markt": [_top_item(7, "Acme overname")]})
+
+    daily_digest.run_now()
+
+    assert "Acme overname" in captured["html"]
+    assert "Geen nieuwe items in deze categorie." in captured["html"]
+
+
+def test_run_now_sends_nothing_when_no_items_at_all(monkeypatch):
+    captured = _patch_run_now(monkeypatch, {})
+
+    daily_digest.run_now()
+
+    assert captured["html"] is None
+
+
+def test_run_now_sends_nothing_when_scoring_service_unreachable(monkeypatch):
+    def _failing_get(url, params, timeout):
+        raise httpx.ConnectError("down", request=httpx.Request("GET", url))
+
+    sent = []
+    monkeypatch.setattr(daily_digest.httpx, "get", _failing_get)
+    monkeypatch.setattr(daily_digest, "fetch_digest_settings", lambda: {"digest_top_n": 5})
+    monkeypatch.setattr(daily_digest, "send_digest", lambda html_body: sent.append(html_body))
+
+    daily_digest.run_now()
+
+    assert sent == []
 
 
 class _FakeSeen:
@@ -312,7 +366,7 @@ def _scored(item_id, category, score):
     }
 
 
-def test_run_keeps_only_market_items_even_when_news_scores_higher(monkeypatch):
+def test_run_sends_top_n_of_each_category_separately(monkeypatch):
     sent = _patch_run(
         monkeypatch,
         [
@@ -320,6 +374,8 @@ def test_run_keeps_only_market_items_even_when_news_scores_higher(monkeypatch):
             _scored(2, "markt", 0.6),
             _scored(3, "nieuws", 0.9),
             _scored(4, "markt", 0.7),
+            _scored(5, "nieuws", 0.2),
+            _scored(6, "markt", 0.1),
         ],
         top_n=2,
     )
@@ -328,36 +384,21 @@ def test_run_keeps_only_market_items_even_when_news_scores_higher(monkeypatch):
 
     assert len(sent) == 1
     body = sent[0]
-    assert "item 4" in body and "item 2" in body
-    assert "item 1" not in body and "item 3" not in body
-    assert body.index("item 4") < body.index("item 2")  # highest market score first
+    market_part, news_part = body.split("Nieuws</h2>")
+    # Two best of each category, highest score first; the rest is cut per category.
+    assert "item 4" in market_part and "item 2" in market_part and "item 6" not in market_part
+    assert market_part.index("item 4") < market_part.index("item 2")
+    assert "item 1" in news_part and "item 3" in news_part and "item 5" not in news_part
+    assert news_part.index("item 1") < news_part.index("item 3")
+    # A high-scoring news item never displaces a market item, or vice versa.
+    assert "item 1" not in market_part and "item 4" not in news_part
 
 
-def test_run_sends_nothing_when_no_item_is_market_development(monkeypatch):
+def test_run_sends_a_digest_with_one_empty_section_when_a_category_is_missing(monkeypatch):
     sent = _patch_run(monkeypatch, [_scored(1, "nieuws", 0.9), _scored(2, "nieuws", 0.8)])
 
     daily_digest.run()
 
-    assert sent == []
-
-
-def test_run_now_sends_nothing_when_no_items(monkeypatch):
-    captured = _patch_run_now(monkeypatch, [])
-
-    daily_digest.run_now()
-
-    assert captured["html"] is None
-
-
-def test_run_now_sends_nothing_when_scoring_service_unreachable(monkeypatch):
-    def _failing_get(url, params, timeout):
-        raise httpx.ConnectError("down", request=httpx.Request("GET", url))
-
-    sent = []
-    monkeypatch.setattr(daily_digest.httpx, "get", _failing_get)
-    monkeypatch.setattr(daily_digest, "fetch_digest_settings", lambda: {"digest_top_n": 5})
-    monkeypatch.setattr(daily_digest, "send_digest", lambda html_body: sent.append(html_body))
-
-    daily_digest.run_now()
-
-    assert sent == []
+    assert len(sent) == 1
+    assert "item 1" in sent[0]
+    assert "Marktontwikkeling</h2><p>Geen nieuwe items in deze categorie.</p>" in sent[0]

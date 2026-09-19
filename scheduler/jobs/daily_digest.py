@@ -21,10 +21,14 @@ from seen_items import SeenItemsCache
 
 DIGEST_SUBJECT = "Security Trendwatch — dagelijkse digest"
 
-# The digest only carries market developments (funding, overnames,
-# marktcijfers, ...), not plain security news — the scoring-service tags every
-# item with a category (app/classification.py) and this is the one we keep.
-DIGEST_CATEGORY = "markt"
+# The digest has one section per category, each with its own top-N. The
+# scoring-service tags every item "markt" (funding, overnames, marktcijfers,
+# ...) or "nieuws" (app/classification.py) and scores each category against
+# your 👍/👎 in that category only. Order here = order in the mail.
+DIGEST_SECTIONS = (
+    ("markt", "Marktontwikkeling"),
+    ("nieuws", "Nieuws"),
+)
 
 # score_entry retries a failed POST /score up to twice, waiting these many
 # seconds before each retry, before giving up on the item.
@@ -116,9 +120,12 @@ def _safe_link(url: str, label: str) -> str:
     return escaped_label
 
 
-def build_digest_html(top_items: list[dict]) -> str:
+def _section_html(heading: str, items: list[dict]) -> str:
+    if not items:
+        return f"<h2>{html.escape(heading)}</h2><p>Geen nieuwe items in deze categorie.</p>"
+
     rows = []
-    for item in top_items:
+    for item in items:
         interessant_url = (
             f"{config.FEEDBACK_BASE_URL}/feedback-link?item_id={item['item_id']}&label=interessant"
         )
@@ -136,13 +143,21 @@ def build_digest_html(top_items: list[dict]) -> str:
             "</tr>"
         )
     return (
-        "<html><body>"
-        f"<h1>{DIGEST_SUBJECT}</h1>"
+        f"<h2>{html.escape(heading)}</h2>"
         '<table border="1" cellpadding="6" cellspacing="0">'
         "<tr><th>Titel</th><th>Bron</th><th>Samenvatting</th><th>Score</th><th>Feedback</th></tr>"
         f"{''.join(rows)}"
-        "</table></body></html>"
+        "</table>"
     )
+
+
+def build_digest_html(items_by_category: dict[str, list[dict]]) -> str:
+    """One mail, one section per DIGEST_SECTIONS entry (an empty one says so)."""
+    sections = "".join(
+        _section_html(heading, items_by_category.get(category, []))
+        for category, heading in DIGEST_SECTIONS
+    )
+    return f"<html><body><h1>{DIGEST_SUBJECT}</h1>{sections}</body></html>"
 
 
 def send_digest(html_body: str) -> None:
@@ -206,18 +221,16 @@ def run() -> None:
             logger.info("Geen nieuwe items gevonden in de actieve bronnen.")
             return
 
-        market_items = [i for i in scored_items if i.get("category") == DIGEST_CATEGORY]
-        logger.info(
-            "%d van %d nieuwe items zijn marktontwikkeling (de rest is nieuws en valt buiten de digest).",
-            len(market_items), len(scored_items),
-        )
-        if not market_items:
-            logger.info("Geen marktontwikkeling tussen de nieuwe items — geen digest verstuurd.")
-            return
-
         digest_top_n = fetch_digest_settings()["digest_top_n"]
-        top_items = sorted(market_items, key=lambda i: i["relevance_score"], reverse=True)[:digest_top_n]
-        send_digest(build_digest_html(top_items))
+        top_by_category = {}
+        for category, _heading in DIGEST_SECTIONS:
+            in_category = [i for i in scored_items if i.get("category") == category]
+            top_by_category[category] = sorted(
+                in_category, key=lambda i: i["relevance_score"], reverse=True
+            )[:digest_top_n]
+            logger.info("%d van %d nieuwe items in categorie %s.", len(in_category), len(scored_items), category)
+
+        send_digest(build_digest_html(top_by_category))
 
 
 def _source_name(source_url: str) -> str:
@@ -236,36 +249,45 @@ def run_now() -> None:
     """Immediate digest: mails the best already-scored items from the last
     MANUAL_DIGEST_LOOKBACK_DAYS days without fetching feeds or scoring
     anything, so it doesn't wait on the (rate-limited) scoring step. Used by
-    the admin GUI's "verstuur nu" button; the scheduled run() is unchanged."""
+    the admin GUI's "verstuur nu" button; the scheduled run() is unchanged.
+    Same layout as the daily digest: top-N per category."""
     digest_top_n = fetch_digest_settings()["digest_top_n"]
-    try:
-        resp = httpx.get(
-            f"{config.SCORING_SERVICE_URL}/items/top",
-            params={
-                "days": config.MANUAL_DIGEST_LOOKBACK_DAYS,
-                "limit": digest_top_n,
-                "category": DIGEST_CATEGORY,
-            },
-            timeout=30.0,
-        )
-        resp.raise_for_status()
-    except httpx.HTTPError:
-        logger.exception("Kon /items/top niet ophalen — geen digest verstuurd.")
-        return
+    top_by_category = {}
+    for category, _heading in DIGEST_SECTIONS:
+        try:
+            resp = httpx.get(
+                f"{config.SCORING_SERVICE_URL}/items/top",
+                params={
+                    "days": config.MANUAL_DIGEST_LOOKBACK_DAYS,
+                    "limit": digest_top_n,
+                    "category": category,
+                },
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+        except httpx.HTTPError:
+            logger.exception("Kon /items/top (%s) niet ophalen — geen digest verstuurd.", category)
+            return
 
-    items = resp.json()
-    if not items:
+        items = resp.json()
+        for item in items:
+            item["source_name"] = _source_name(item["source_url"])
+        top_by_category[category] = items
+
+    total = sum(len(items) for items in top_by_category.values())
+    if total == 0:
         logger.info(
-            "Geen gescoorde marktontwikkeling in de laatste %d dagen — geen digest verstuurd.",
+            "Geen gescoorde items in de laatste %d dagen — geen digest verstuurd.",
             config.MANUAL_DIGEST_LOOKBACK_DAYS,
         )
         return
 
-    for item in items:
-        item["source_name"] = _source_name(item["source_url"])
-
-    logger.info("Handmatige digest: %d item(s) uit de laatste %d dagen.", len(items), config.MANUAL_DIGEST_LOOKBACK_DAYS)
-    send_digest(build_digest_html(items))
+    logger.info(
+        "Handmatige digest: %s uit de laatste %d dagen.",
+        ", ".join(f"{len(items)} {category}" for category, items in top_by_category.items()),
+        config.MANUAL_DIGEST_LOOKBACK_DAYS,
+    )
+    send_digest(build_digest_html(top_by_category))
 
 
 if __name__ == "__main__":

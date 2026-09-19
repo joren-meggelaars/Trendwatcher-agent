@@ -28,9 +28,31 @@ opstarten automatisch aangemaakt (`Base.metadata.create_all`, idempotent).
 ## Endpoints
 
 - `POST /score` — `{source, title, url, raw_content, source_id?}` →
-  `{item_id, summary, relevance_score}`. Uitgaande links in `raw_content`
-  worden automatisch als kandidaat-bron geregistreerd (zie hieronder); dit
-  verandert niets aan de response.
+  `{item_id, summary, relevance_score, category}`. Uitgaande links in
+  `raw_content` worden automatisch als kandidaat-bron geregistreerd (zie
+  hieronder); dit verandert niets aan de response. Een al opgeslagen `url`
+  geeft het bestaande item terug (geen duplicaat, geen nieuwe embedding).
+  `category` is `"markt"` (funding, overnames, marktcijfers) of `"nieuws"`,
+  bepaald met trefwoorden op titel + samenvatting (`app/classification.py`).
+- `GET /items/top?days=7&limit=5&category=markt|nieuws` — beste al gescoorde
+  items, hoogste score eerst; met `category` wordt eerst gefilterd en pas
+  daarna gelimiteerd.
+
+### Hoe de score tot stand komt
+
+Er wordt geen model getraind: de embeddings komen van een vooraf getraind
+model (Voyage) en veranderen niet. "Leren" is hier dat je feedback de
+vergelijkingsverzameling bepaalt. Voor een nieuw item, binnen zijn eigen
+categorie (markt en nieuws leren los van elkaar):
+
+`score = 0,5 + nabijheid tot het dichtstbijzijnde 👍-item − nabijheid tot het
+dichtstbijzijnde 👎-item`
+
+waarbij elke kant neutraal (0,5) is zolang er nog geen feedback van die soort
+is, en nabijheid de cosine-similarity is, herschaald naar 0–1. Zonder
+feedback is elke score dus 0,5. De score wordt één keer berekend, bij het
+scoren; bestaande items worden niet opnieuw gescoord als je later feedback
+geeft.
 - `POST /feedback` — `{item_id, label: "interessant" | "niet_interessant"}` →
   `{status: "ok"}`, of een `404` als `item_id` niet bestaat.
 - `POST /sources` — `{url, type, discovery_method?}` → nieuwe `Source` met
