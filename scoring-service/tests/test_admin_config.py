@@ -27,7 +27,7 @@ def _capture_scheduler_pings(monkeypatch, *, fail=False):
 def test_config_page_requires_login(client):
     for method in (client.get, client.post):
         resp = method("/admin/config", follow_redirects=False)
-        assert resp.status_code == 303 and resp.headers["location"] == "/admin/login"
+        assert resp.status_code == 303 and resp.headers["location"].startswith("/admin/login")
 
 
 def test_config_page_lists_every_editable_setting_and_the_console_only_ones(admin_client):

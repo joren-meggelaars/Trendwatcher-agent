@@ -60,9 +60,15 @@ niet inloggen op de admin-GUI.
 docker compose up -d
 ```
 
-Start alle drie de containers. `scoring-service` wacht op Postgres'
-healthcheck (niet alleen op "container bestaat") voordat hij zelf opstart;
-`scheduler` wacht op de gezondheidscheck van `scoring-service`.
+Start alle vier de containers:
+- `postgres`: de database;
+- `scoring-service`: de interne JSON-API (scoren, bronnen, digests, ...), **zonder login en daarom niet gepubliceerd**: alleen bereikbaar voor de andere containers;
+- `web`: de admin-GUI, **het enige dat naar buiten gaat** (poort 8000 op `BIND_ADDRESS`). Bevat geen enkele API-route;
+- `scheduler`: de achtergrondjobs.
+
+`scoring-service` wacht op Postgres' healthcheck (niet alleen op "container
+bestaat"); `web` en `scheduler` wachten op de gezondheidscheck van
+`scoring-service`.
 
 ## 5. Initiële bronnenlijst seeden
 
@@ -117,30 +123,76 @@ alleen via `.env` op de VM te wijzigen (daarna `docker compose up -d`).
 docker compose ps
 ```
 
-Alle drie de services moeten `running`/`healthy` tonen (postgres en
-scoring-service hebben een healthcheck; scheduler heeft er geen — een
-lopende `Up`-status daar is voldoende, want het proces is een simpele
-achtergrond-loop zonder eigen HTTP-endpoint).
+De services `postgres`, `scoring-service` en `web` moeten `healthy` tonen (de
+scheduler heeft geen healthcheck; een lopende `Up`-status is daar voldoende,
+want het proces is een simpele achtergrond-loop).
 
 ```bash
+docker compose logs -f web
 docker compose logs -f scoring-service
 docker compose logs -f scheduler
 ```
 
-Snelle rooktest vanaf de VM zelf:
+Snelle rooktest vanaf de VM zelf. De GUI (`web`) staat op poort 8000; de API
+(`scoring-service`) is bewust niet van buiten de containers bereikbaar, dus die
+test je vanuit de container:
 
 ```bash
 curl -s http://localhost:8000/health
-# {"status":"ok"}
+# {"status":"ok"}      <- de GUI
 
-curl -s -X POST http://localhost:8000/score \
-  -H "Content-Type: application/json" \
-  -d '{"source":"test","title":"T","url":"https://example.com","raw_content":"Test artikel over een kwetsbaarheid."}'
+docker compose exec scoring-service python -c "
+import json, urllib.request
+req = urllib.request.Request('http://localhost:8000/score', method='POST',
+    headers={'Content-Type': 'application/json'},
+    data=json.dumps({'source':'test','title':'T','url':'https://example.com','raw_content':'Test artikel over een kwetsbaarheid.'}).encode())
+print(urllib.request.urlopen(req).read().decode())"
 ```
 
 De admin-GUI is bereikbaar op `http://<BIND_ADDRESS>:8000/admin/login` vanaf
-elk toestel binnen hetzelfde netwerk — niet van buitenaf (daar staat de
-bestaande reverse proxy voor, die hier niet is meegenomen).
+elk toestel binnen hetzelfde netwerk. Voor HTTPS en toegang van buitenaf: zie
+"Bereikbaar van buiten (HTTPS)" hieronder.
+
+## Bereikbaar van buiten (HTTPS)
+
+De knoppen in de digest-mail openen de GUI. Wil je die ook buiten je netwerk
+gebruiken (telefoon zonder VPN), zet dan een reverse proxy met HTTPS voor de
+`web`-container. Wat daarvoor nodig is:
+
+1. **Alleen `web` publiceren.** Laat de proxy alleen naar poort 8000 van de
+   `web`-container wijzen. De `scoring-service` (de API) heeft geen login en
+   staat daarom niet op een host-poort; publiceer die nooit.
+2. **`.env` op de VM** (daarna `docker compose up -d`):
+   ```
+   FEEDBACK_BASE_URL=https://trend.voorbeeld.nl   # zonder slash; hier wijzen de mailknoppen heen
+   SESSION_COOKIE_SECURE=true                     # sessie-cookie alleen over HTTPS
+   ```
+   Let op: met `SESSION_COOKIE_SECURE=true` werkt inloggen alleen nog via het
+   https-adres, niet meer via `http://<BIND_ADDRESS>:8000`.
+3. **De proxy moet doorgeven:** de `Host`-header, en `X-Forwarded-For` waarbij
+   hij het adres van de bezoeker *achteraan toevoegt* (nginx:
+   `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`). De rem op
+   verkeerde wachtwoorden (5 pogingen per adres, dan 15 minuten geblokkeerd)
+   werkt op dat laatste adres. HSTS zet je op de proxy.
+4. **Sterk wachtwoord.** De GUI heeft één account. Er zit een rem op raden, een
+   Content-Security-Policy, bescherming tegen cross-site posts en een
+   sessieduur van 12 uur (of 30 dagen met "onthoud mij"), maar een zwak
+   wachtwoord blijft de zwakste schakel.
+
+Voorbeeld voor nginx:
+
+```nginx
+location / {
+    proxy_pass http://10.0.100.8:8000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+}
+```
+
+Zonder `FEEDBACK_BASE_URL` gebruiken de mailknoppen `http://<BIND_ADDRESS>:8000`,
+dus alleen bruikbaar in je eigen netwerk.
 
 ## 7. Geautomatiseerde tests draaien tegen de Postgres-container
 
@@ -163,15 +215,20 @@ SQLite-JSON-fallback).
 ## 8. Data-persistentie verifiëren
 
 ```bash
-# maak een bron aan
-curl -s -X POST http://localhost:8000/sources \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://example.com/feed","type":"rss"}'
+# maak een bron aan (de API draait alleen binnen de containers)
+docker compose exec scoring-service python -c "
+import json, urllib.request
+req = urllib.request.Request('http://localhost:8000/sources', method='POST',
+    headers={'Content-Type': 'application/json'},
+    data=json.dumps({'url':'https://example.com/feed','type':'rss'}).encode())
+print(urllib.request.urlopen(req).read().decode())"
 
 docker compose restart
 
-curl -s http://localhost:8000/sources
-# de zojuist aangemaakte bron moet er nog steeds staan
+docker compose exec scoring-service python -c "
+import urllib.request
+print(urllib.request.urlopen('http://localhost:8000/sources').read().decode()[:400])"
+# de zojuist aangemaakte bron moet er nog steeds staan (of bekijk /admin/sources)
 ```
 
 ## Onderhoud

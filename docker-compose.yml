@@ -58,11 +58,48 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - trendwatch-net
+
+  # The admin GUI on its own: this is the ONLY thing to publish (and to put
+  # behind the reverse proxy for HTTPS / access from outside). It contains no
+  # JSON API routes at all — those live in scoring-service, which is internal
+  # to the compose network and has no login. Same image, different app.
+  web:
+    build:
+      context: ./scoring-service
+    restart: unless-stopped
+    command: ["uvicorn", "app.web:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY}
+      VOYAGE_MODEL: ${VOYAGE_MODEL:-voyage-3}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-voyage}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
+      DEFAULT_USER_ID: ${DEFAULT_USER_ID:-joren}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH}
+      SESSION_SECRET_KEY: ${SESSION_SECRET_KEY}
+      # true once the GUI is served over HTTPS: the session cookie is then
+      # only sent over HTTPS. Leave false for plain http on the LAN.
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      # The GUI's public address (the same one the mail's buttons use): form
+      # posts from this origin are accepted even if the proxy rewrites Host.
+      PUBLIC_BASE_URL: ${FEEDBACK_BASE_URL:-http://${BIND_ADDRESS}:8000}
+      SCHEDULER_URL: http://scheduler:${TRIGGER_SERVER_PORT:-8001}
+    depends_on:
+      scoring-service:
+        condition: service_healthy
     ports:
       # Reachable only from the VM's own (LAN-facing) network interface, not
       # every interface on the box — set BIND_ADDRESS in .env to that
-      # interface's IP. A separate reverse proxy (out of scope here) handles
-      # any access from outside the local network.
+      # interface's IP. The reverse proxy (HTTPS, access from outside) points here.
       - "${BIND_ADDRESS}:8000:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]

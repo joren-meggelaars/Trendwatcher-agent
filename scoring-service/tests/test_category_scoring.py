@@ -83,7 +83,10 @@ def test_thumbs_down_pulls_a_liked_neighbourhood_back_down(client):
     disliked = _score(client, (NEWS_LIKED[0] + " again", NEWS_LIKED[1] + " again"))
     _thumb(client, disliked["item_id"], "niet_interessant")
 
-    assert _score(client, NEWS_SIMILAR)["relevance_score"] < baseline
+    # scored again as a different article: the same title from the same source
+    # would (rightly) come back as the item that is already stored
+    again = (NEWS_SIMILAR[0] + " again", NEWS_SIMILAR[1])
+    assert _score(client, again)["relevance_score"] < baseline
 
 
 def test_no_feedback_at_all_scores_neutral(client):

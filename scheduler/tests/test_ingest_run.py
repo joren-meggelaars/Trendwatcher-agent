@@ -22,6 +22,7 @@ def _patch_run(monkeypatch, sources, entries_by_source, scorer):
     monkeypatch.setattr(ingest, "fetch_active_sources", lambda client: sources)
     monkeypatch.setattr(ingest, "fetch_new_entries", lambda source, _seen: entries_by_source[source["id"]](source))
     monkeypatch.setattr(ingest, "score_entry", scorer)
+    monkeypatch.setattr(ingest, "rescore", lambda client: 0)  # no scoring-service in these tests
     return seen
 
 
@@ -92,3 +93,55 @@ def test_run_does_nothing_without_active_sources(monkeypatch):
     ingest.run()
 
     assert seen.marked == []
+
+
+def test_run_asks_for_a_rescore_after_the_sources_and_reports_it(monkeypatch, caplog):
+    order = []
+    seen = _FakeSeen()
+    monkeypatch.setattr(ingest.SeenItemsCache, "load", classmethod(lambda cls: seen))
+    monkeypatch.setattr(ingest, "fetch_active_sources", lambda client: [{"id": 1, "url": "https://a"}])
+    monkeypatch.setattr(ingest, "fetch_new_entries", lambda source, _seen: _entries("a1")(source))
+    monkeypatch.setattr(ingest, "score_entry", lambda client, entry, source: order.append("score") or {})
+    monkeypatch.setattr(ingest, "rescore", lambda client: order.append("rescore") or 4)
+
+    with caplog.at_level("INFO"):
+        ingest.run()
+
+    assert order == ["score", "rescore"]
+    assert "4 score(s) bijgewerkt" in caplog.text
+
+
+def test_a_failing_rescore_does_not_fail_the_ingest(monkeypatch):
+    seen = _patch_run(monkeypatch, [{"id": 1, "url": "https://a"}], {1: _entries("a1")}, lambda *a: {})
+    monkeypatch.setattr(
+        ingest, "rescore", lambda client: None
+    )  # what rescore returns when the service is down
+
+    ingest.run()
+
+    assert seen.marked == ["a1"]
+
+
+def test_rescore_posts_to_the_service_and_survives_errors(monkeypatch):
+    calls = []
+
+    class _Resp:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self):
+            return {"updated": 3}
+
+    class _Client:
+        def post(self, url, timeout):
+            calls.append(url)
+            return _Resp()
+
+    assert ingest.rescore(_Client()) == 3
+    assert calls[0].endswith("/items/rescore")
+
+    class _Down:
+        def post(self, url, timeout):
+            raise httpx.ConnectError("down", request=httpx.Request("POST", url))
+
+    assert ingest.rescore(_Down()) is None

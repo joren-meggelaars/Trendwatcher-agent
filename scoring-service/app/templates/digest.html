@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Digest {{ digest.created_at.strftime("%d-%m-%Y") }}{% endblock %}
+{% block container_class %}narrow{% endblock %}
+{% block content %}
+<div data-digest>
+
+<div class="hero">
+  <h1>Digest van {{ digest.created_at.strftime("%d-%m-%Y") }}</h1>
+  <p class="sub">
+    {{ digest.created_at.strftime("%H:%M") }} UTC ·
+    {% if digest.kind == "preview" %}voorbeeld ("Verstuur nu"){% else %}dagelijkse digest{% endif %}
+    {% if not digest.mailed %} · niet verstuurd (dry-run of mislukt){% endif %}
+  </p>
+  <div class="progress-label"><span id="progress-text">{{ voted }} van {{ total }} beoordeeld</span><span>👍 / 👎 op deze pagina</span></div>
+  <div class="progress"><span id="progress-bar"></span></div>
+</div>
+
+<noscript><p class="warning">Voor het beoordelen op deze pagina is JavaScript nodig.</p></noscript>
+
+{% for section in sections %}
+<div class="section-title">
+  <span class="badge badge-{{ section.category }}">{{ section.heading }}</span>
+  <span class="count">{{ section.cards|length }} item{{ "s" if section.cards|length != 1 }}</span>
+</div>
+{% for card in section.cards %}
+<article class="item-card {{ 'voted-up' if card.vote == 'like' }}{{ 'voted-down' if card.vote == 'dislike' }}" data-item="{{ card.id }}" data-vote="{{ card.vote or '' }}">
+  <h3 class="item-title"><a href="{{ card.url }}" target="_blank" rel="noopener noreferrer">{{ card.title }}</a></h3>
+  <div class="item-meta">
+    <span>{{ card.source }}</span>
+    {% if card.score is not none %}<span>score {{ "%.2f"|format(card.score) }}</span>{% endif %}
+  </div>
+  {% if card.summary %}<p class="item-summary">{{ card.summary }}</p>{% endif %}
+  <div class="vote-row">
+    <button type="button" class="vote-btn up" data-action="like" aria-pressed="{{ 'true' if card.vote == 'like' else 'false' }}">👍 Interessant</button>
+    <button type="button" class="vote-btn down" data-action="dislike" aria-pressed="{{ 'true' if card.vote == 'dislike' else 'false' }}">👎 Niet interessant</button>
+    <span class="vote-state">{% if card.vote == "like" %}Interessant{% elif card.vote == "dislike" %}Niet interessant{% endif %}</span>
+  </div>
+</article>
+{% else %}
+<p class="muted">Geen items in deze sectie.</p>
+{% endfor %}
+{% endfor %}
+
+<p class="hint">Klik nogmaals op een gekozen knop om je antwoord te wissen. Elke wijziging kun je direct ongedaan maken.
+  <a href="/admin/digests">Alle digests</a> · <a href="/admin/review">Meer artikelen beoordelen</a></p>
+
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/digest.js" defer></script>{% endblock %}

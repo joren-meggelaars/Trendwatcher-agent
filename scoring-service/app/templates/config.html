@@ -1,32 +1,41 @@
 {% extends "base.html" %}
-{% block title %}Configuratie — Trendwatcher Admin{% endblock %}
+{% block title %}Configuratie{% endblock %}
 {% block content %}
-<h1>Configuratie</h1>
+<div class="page-head">
+  <div>
+    <h1>Configuratie</h1>
+    <p class="sub">De instellingen die normaal in <code>.env</code> staan, zonder herstart aan te passen.</p>
+  </div>
+</div>
 
 {% if message %}<p class="success">{{ message }}</p>{% endif %}
 {% if warning %}<p class="error">{{ warning }}</p>{% endif %}
 {% if has_errors %}<p class="error">Niets opgeslagen: corrigeer de gemarkeerde velden.</p>{% endif %}
 
-<p style="color:#444; max-width:60rem">
-  Hier stel je de instellingen af die normaal in <code>.env</code> staan. Een ingevulde waarde
-  <strong>overschrijft</strong> <code>.env</code>; laat je een veld <strong>leeg</strong>, dan geldt weer de
-  waarde uit <code>.env</code>. Wijzigingen gelden direct, zonder herstart (de scheduler neemt ze zelf over).
-  Geheimen en instellingen die bepalen waar mail heen gaat, staan hier bewust niet en blijven alleen via de
-  console (<code>.env</code> op de VM) te wijzigen; zie onderaan.
-  Het digest-uur en het aantal items per digest staan op <a href="/admin/settings">Digest-instellingen</a>.
-</p>
+<div class="card card-pad">
+  <p class="mt-0">
+    Een ingevulde waarde <strong>overschrijft</strong> <code>.env</code>; laat je een veld <strong>leeg</strong>, dan geldt weer de
+    waarde uit <code>.env</code>. Wijzigingen gelden direct, zonder herstart (de scheduler neemt ze zelf over).
+    Geheimen en instellingen die bepalen waar mail heen gaat, staan hier bewust niet en blijven alleen via de
+    console (<code>.env</code> op de VM) te wijzigen; zie onderaan.
+    Het digest-uur en het aantal items per digest staan op <a href="/admin/settings">Digest-instellingen</a>.
+  </p>
+</div>
 
-<form method="post" action="/admin/config" onsubmit="return confirmDryRun(this);">
+<form method="post" action="/admin/config" data-confirm-when="s__DIGEST_DRY_RUN=false"
+      data-confirm-text="Dry-run staat dan uit: de dagelijkse digest wordt echt gemaild. Doorgaan?">
 {% for group, rows in groups.items() %}
 <h2>{{ group }}</h2>
+<div class="table-wrap">
 <table>
-<tr><th style="width:22%">Instelling</th><th style="width:16%">Waarde</th><th style="width:14%">Uit .env</th><th>Uitleg</th></tr>
+<thead><tr><th>Instelling</th><th>Waarde</th><th>Uit .env</th><th>Uitleg</th></tr></thead>
+<tbody>
 {% for row in rows %}
 {% set spec = row.spec %}
 <tr>
   <td>
-    <label for="s__{{ spec.key }}"><strong>{{ spec.label }}</strong></label><br>
-    <small style="color:#666"><code>{{ spec.key }}</code></small>
+    <label for="s__{{ spec.key }}">{{ spec.label }}</label><br>
+    <small><code>{{ spec.key }}</code></small>
     {% if row.overridden %}<br><span class="status status-kandidaat">overschreven</span>{% endif %}
   </td>
   <td>
@@ -44,53 +53,48 @@
       {% endfor %}
     </select>
     {% else %}
-    <input id="s__{{ spec.key }}" name="s__{{ spec.key }}" value="{{ row.value }}"
+    <input id="s__{{ spec.key }}" name="s__{{ spec.key }}" value="{{ row.value }}" size="8"
            {% if spec.kind == "int" %}type="number" step="1"{% else %}type="text" inputmode="decimal"{% endif %}
            {% if spec.minimum is not none %}min="{{ spec.minimum }}"{% endif %}
            {% if spec.maximum is not none %}max="{{ spec.maximum }}"{% endif %}
-           placeholder="{{ row.env_text if row.env_text is not none else row.default_text }}"
-           style="width:8rem">
+           placeholder="{{ row.env_text if row.env_text is not none else row.default_text }}">
     {% endif %}
-    {% if row.error %}<div class="error" style="margin:0.25rem 0 0">{{ row.error }}</div>{% endif %}
+    {% if row.error %}<div class="field"><div class="error">{{ row.error }}</div></div>{% endif %}
   </td>
   <td>
     {% if row.env_text is not none %}{{ row.env_text }}
-    {% else %}<span style="color:#888">onbekend<br><small>(standaard {{ row.default_text }})</small></span>{% endif %}
+    {% else %}<span class="muted">onbekend<br><small>(standaard {{ row.default_text }})</small></span>{% endif %}
   </td>
   <td>
     {{ spec.help }}
-    {% if spec.note %}<br><small style="color:#666">Bij wijzigen: {{ spec.note }}.</small>{% endif %}
+    {% if spec.note %}<br><small>Bij wijzigen: {{ spec.note }}.</small>{% endif %}
     {% if spec.minimum is not none and spec.maximum is not none %}
-    <br><small style="color:#666">Toegestaan: {{ "%g"|format(spec.minimum) }} t/m {{ "%g"|format(spec.maximum) }}.</small>
+    <br><small>Toegestaan: {{ "%g"|format(spec.minimum) }} t/m {{ "%g"|format(spec.maximum) }}.</small>
     {% endif %}
   </td>
 </tr>
 {% endfor %}
+</tbody>
 </table>
+</div>
 {% endfor %}
 
-<button type="submit">Opslaan</button>
+<button type="submit" class="btn btn-primary">Opslaan</button>
 </form>
 
 <h2>Alleen via de console</h2>
-<p style="color:#444; max-width:60rem">
+<p class="muted">
   Deze staan niet in de GUI en zijn hier ook niet zichtbaar (alleen de naam). Pas ze aan in <code>.env</code> op de
   VM en start daarna de betreffende container opnieuw.
 </p>
+<div class="table-wrap">
 <table>
-<tr><th style="width:40%">Instelling</th><th>Waarom alleen via de console</th></tr>
+<thead><tr><th>Instelling</th><th>Waarom alleen via de console</th></tr></thead>
+<tbody>
 {% for item in console_only %}
 <tr><td><code>{{ item.name }}</code></td><td>{{ item.reason }}</td></tr>
 {% endfor %}
+</tbody>
 </table>
-
-<script>
-function confirmDryRun(form) {
-  var field = form.elements["s__DIGEST_DRY_RUN"];
-  if (field && field.value === "false") {
-    return confirm("Dry-run staat dan uit: de dagelijkse digest wordt echt gemaild. Doorgaan?");
-  }
-  return true;
-}
-</script>
+</div>
 {% endblock %}

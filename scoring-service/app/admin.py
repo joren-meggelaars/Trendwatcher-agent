@@ -8,17 +8,26 @@ import html
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, Form, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app import digest_settings, discovery, models, runtime_settings
-from app.auth import NotAuthenticated, SESSION_KEY, require_admin_session, verify_admin_credentials
+from app import digest_settings, digest_view, discovery, models, review, runtime_settings, schemas, scoring, security, textclean
+from app.auth import (
+    REMEMBER_DAYS,
+    SESSION_MAX_AGE,
+    NotAuthenticated,
+    require_admin_session,
+    safe_next,
+    start_session,
+    verify_admin_credentials,
+)
 from app.config import settings
 from app.database import get_db
 from app.embeddings import EmbeddingProvider, get_embedding_provider
@@ -26,8 +35,29 @@ from app.scoring import score_and_store
 
 router = APIRouter(prefix="/admin")
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+# Items stored before titles were cleaned still carry HTML entities.
+templates.env.filters["clean_text"] = textclean.clean_text
 
 ITEMS_PER_PAGE = 50
+
+
+def _nav_key(path: str) -> str:
+    """Which menu entry a page belongs to (for the highlight in the sidebar)."""
+    for prefix, key in (
+        ("/admin/digest", "digests"),
+        ("/admin/review", "review"),
+        ("/admin/sources", "sources"),
+        ("/admin/items/batch-add", "batch"),
+        ("/admin/items", "items"),
+        ("/admin/settings", "settings"),
+        ("/admin/config", "config"),
+    ):
+        if path.startswith(prefix):
+            return key
+    return ""
+
+
+templates.env.globals["nav_key"] = _nav_key
 _STATUSES = ("kandidaat", "actief", "gedeactiveerd")
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -62,22 +92,57 @@ def admin_root() -> RedirectResponse:
     return RedirectResponse(url="/admin/sources")
 
 
+def _logged_in(request: Request) -> bool:
+    try:
+        require_admin_session(request)
+    except NotAuthenticated:
+        return False
+    return True
+
+
 @router.get("/login")
-def login_form(request: Request):
-    if request.session.get(SESSION_KEY):
-        return RedirectResponse(url="/admin/sources", status_code=303)
-    return templates.TemplateResponse(request, "login.html", {"error": None})
+def login_form(request: Request, next: str | None = None):
+    destination = safe_next(next)
+    if _logged_in(request):
+        return RedirectResponse(url=destination, status_code=303)
+    # `next` is where the login was needed (e.g. a 👍 link from the mail): back there afterwards.
+    return templates.TemplateResponse(
+        request, "login.html", {"error": None, "next": destination if next else "", "remember_days": REMEMBER_DAYS}
+    )
 
 
 @router.post("/login")
-def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
+def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    remember: str | None = Form(None),
+    next: str | None = Form(None),
+):
+    key = security.client_ip(request)
+    context = {"next": safe_next(next) if next else "", "remember_days": REMEMBER_DAYS}
+
+    locked = security.login_throttle.seconds_locked(key)
+    if locked:  # no password check at all while locked: neither guessing nor CPU burning
+        minutes = (locked + 59) // 60
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {**context, "error": f"Te veel mislukte pogingen. Probeer het over {minutes} minu{'ut' if minutes == 1 else 'ten'} opnieuw."},
+            status_code=429,
+            headers={"Retry-After": str(locked)},
+        )
+
     if verify_admin_credentials(username, password):
-        request.session[SESSION_KEY] = True
-        return RedirectResponse(url="/admin/sources", status_code=303)
+        security.login_throttle.record_success(key)
+        start_session(request, remember=bool(remember))
+        return RedirectResponse(url=safe_next(next), status_code=303)
+
+    security.login_throttle.record_failure(key)
     return templates.TemplateResponse(
         request,
         "login.html",
-        {"error": "Ongeldige gebruikersnaam of wachtwoord."},
+        {**context, "error": "Ongeldige gebruikersnaam of wachtwoord."},
         status_code=401,
     )
 
@@ -113,7 +178,12 @@ def list_sources_page(
     return templates.TemplateResponse(
         request,
         "sources.html",
-        {"sources": sources, "item_counts": item_counts, "statuses": _STATUSES},
+        {
+            "sources": sources,
+            "item_counts": item_counts,
+            "statuses": _STATUSES,
+            "current_status": status if status in _STATUSES else None,
+        },
     )
 
 
@@ -425,10 +495,248 @@ async def config_submit(
     return _render_config(request, db, message=message, warning=warning)
 
 
-def _handle_not_authenticated(request: Request, exc: NotAuthenticated) -> RedirectResponse:
+# --- review: quick thumbs on articles, independent of the digest --------------
+#
+# Offers stored articles one after another for a 👍/👎 (or a skip), so initial
+# feedback can be given fast instead of waiting for it to show up in a digest.
+# The page works without JavaScript (plain form posts); with it, a click removes
+# the card without a reload and the keys y/n/s/u do the same from the keyboard.
+
+_REVIEW_CATEGORIES = {"markt": "markt", "nieuws": "nieuws", "alles": None}
+_REVIEW_ACTIONS = {"like": "interessant", "dislike": "niet_interessant", "skip": review.SKIPPED}
+
+
+def _review_category(value: str) -> str:
+    return value if value in _REVIEW_CATEGORIES else "markt"
+
+
+def _wants_json(request: Request) -> bool:
+    return request.headers.get("x-requested-with") == "fetch"
+
+
+def _source_label(source: str) -> str:
+    if source.lower().startswith("mailto:"):
+        return source[len("mailto:"):]
+    return discovery.extract_domain(source) or source
+
+
+@router.get("/review")
+def review_page(
+    request: Request,
+    category: str = "markt",
+    updated: int | None = None,
+    db: Session = Depends(get_db),
+    _admin: None = Depends(require_admin_session),
+):
+    category = _review_category(category)
+    view = review.overview(db, settings.default_user_id, _REVIEW_CATEGORIES[category])
+    cards = []
+    for candidate in view.queue:
+        title, summary = review.card_text(candidate.item)
+        cards.append(
+            {
+                "id": candidate.item.id,
+                "title": title,
+                "summary": summary,
+                "url": candidate.item.url,
+                "category": candidate.category,
+                "score": candidate.item.relevance_score,
+                "source": _source_label(candidate.item.source),
+                "created": candidate.item.created_at,
+            }
+        )
+    return templates.TemplateResponse(
+        request,
+        "review.html",
+        {"cards": cards, "category": category, "waiting": view.waiting, "given": view.given, "updated": updated},
+    )
+
+
+# Declared before /review/{item_id}: otherwise "rescore" would be parsed as an item id.
+@router.post("/review/rescore")
+async def review_rescore(
+    request: Request,
+    db: Session = Depends(get_db),
+    _admin: None = Depends(require_admin_session),
+):
+    form = await request.form()
+    category = _review_category(str(form.get("category", "markt")))
+    updated = scoring.rescore_recent(db, settings.default_user_id, force=True)
+    if _wants_json(request):
+        return JSONResponse({"updated": updated})
+    return RedirectResponse(url=f"/admin/review?category={category}&updated={updated}", status_code=303)
+
+
+@router.post("/review/undo/{feedback_id}")
+async def review_undo(
+    feedback_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _admin: None = Depends(require_admin_session),
+):
+    form = await request.form()
+    category = _review_category(str(form.get("category", "markt")))
+    feedback = db.get(models.Feedback, feedback_id)
+    if feedback is not None and feedback.user_id == settings.default_user_id:
+        db.delete(feedback)
+        db.commit()
+    if _wants_json(request):
+        return JSONResponse({"ok": True})
+    return RedirectResponse(url=f"/admin/review?category={category}", status_code=303)
+
+
+@router.post("/review/{item_id}")
+async def review_action(
+    item_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _admin: None = Depends(require_admin_session),
+):
+    form = await request.form()
+    label = _REVIEW_ACTIONS.get(str(form.get("action", "")))
+    category = _review_category(str(form.get("category", "markt")))
+
+    if label is None or db.get(models.Item, item_id) is None:
+        if _wants_json(request):
+            return JSONResponse({"ok": False}, status_code=422 if label is None else 404)
+        return RedirectResponse(url=f"/admin/review?category={category}", status_code=303)
+
+    # One answer per item: a double click (or a thumb already given through the
+    # mail link) must not add a second row.
+    feedback = (
+        db.query(models.Feedback)
+        .filter(models.Feedback.item_id == item_id, models.Feedback.user_id == settings.default_user_id)
+        .order_by(models.Feedback.id.desc())
+        .first()
+    )
+    created = feedback is None
+    if created:
+        feedback = models.Feedback(item_id=item_id, user_id=settings.default_user_id, label=label)
+        db.add(feedback)
+        db.commit()
+    if _wants_json(request):
+        return JSONResponse({"ok": True, "feedback_id": feedback.id, "created": created, "label": feedback.label})
+    return RedirectResponse(url=f"/admin/review?category={category}", status_code=303)
+
+
+# --- digests: the pages the mail links to ---------------------------------------
+#
+# A 👍/👎 link in the digest mail opens /admin/digest/<id>?vote=<item>:<action>.
+# Not logged in: the login page first (and back here afterwards). The page
+# records that vote itself — with a POST from the page, never from the link, so
+# a mail scanner or link preview that fetches the URL cannot cast votes — and
+# shows the whole digest to work through without leaving the page.
+
+def _not_found(request: Request, what: str):
+    return templates.TemplateResponse(request, "error.html", {"title": "Niet gevonden", "message": what}, status_code=404)
+
+
+@router.get("/digests")
+def digests_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    _admin: None = Depends(require_admin_session),
+):
+    return templates.TemplateResponse(
+        request, "digests.html", {"rows": digest_view.archive(db, settings.default_user_id)}
+    )
+
+
+# Declared before /digest/{digest_id}: otherwise "latest" would be parsed as an id.
+@router.get("/digest/latest")
+def digest_latest(db: Session = Depends(get_db), _admin: None = Depends(require_admin_session)):
+    latest = digest_view.latest_digest_id(db)
+    return RedirectResponse(url=f"/admin/digest/{latest}" if latest else "/admin/digests", status_code=303)
+
+
+@router.get("/digest/{digest_id}")
+def digest_page(
+    request: Request,
+    digest_id: int,
+    db: Session = Depends(get_db),
+    _admin: None = Depends(require_admin_session),
+):
+    """One digest as it was mailed, to vote on. A `?vote=<item>:<like|dislike>`
+    (from a mail link) is applied by the page's script with a POST, not here."""
+    page = digest_view.digest_page(db, digest_id, settings.default_user_id, _source_label)
+    if page is None:
+        return _not_found(request, "Deze digest bestaat niet (meer).")
+    return templates.TemplateResponse(request, "digest.html", page)
+
+
+@router.post("/vote/{item_id}")
+async def vote(
+    item_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _admin: None = Depends(require_admin_session),
+):
+    """Make like/dislike/clear your one answer for an item (used by the digest
+    and review pages). Answers with the previous state, for an exact undo."""
+    form = await request.form()
+    action = str(form.get("action", ""))
+    if action not in ("like", "dislike", "clear"):
+        return JSONResponse({"ok": False}, status_code=422)
+    if db.get(models.Item, item_id) is None:
+        return JSONResponse({"ok": False}, status_code=404)
+    previous, new = digest_view.set_vote(db, settings.default_user_id, item_id, action)
+    return JSONResponse({"ok": True, "vote": new, "previous": previous})
+
+
+@router.get("/vote-link")
+def vote_link(
+    item_id: int,
+    label: str,
+    db: Session = Depends(get_db),
+    _admin: None = Depends(require_admin_session),
+):
+    """Where an old-style mail link (/feedback-link) ends up once logged in:
+    the newest digest containing the item, with the vote to record. Mails from
+    before digests were recorded have no such digest: the review page then."""
+    action = digest_view.action_for(label)
+    if action is None:
+        return RedirectResponse(url="/admin/digests", status_code=303)
+    digest_id = digest_view.latest_digest_containing(db, item_id)
+    target = f"/admin/digest/{digest_id}" if digest_id else "/admin/review?category=alles"
+    separator = "&" if "?" in target else "?"
+    return RedirectResponse(url=f"{target}{separator}vote={item_id}:{action}", status_code=303)
+
+
+# Public (no login, no state change): the 👍/👎 links in mails sent before the
+# digest pages existed. They only redirect — through the login — to /vote-link.
+public_router = APIRouter()
+
+
+@public_router.get("/feedback-link")
+def feedback_link(item_id: int, label: schemas.FeedbackLabel) -> RedirectResponse:
+    return RedirectResponse(url=f"/admin/vote-link?{urlencode({'item_id': item_id, 'label': label})}", status_code=303)
+
+
+def _handle_not_authenticated(request: Request, exc: NotAuthenticated):
+    if _wants_json(request):  # the session ran out while a page was open
+        return JSONResponse({"ok": False, "login": True}, status_code=401)
+    if request.method == "GET":
+        target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        return RedirectResponse(url=f"/admin/login?next={quote(target, safe='')}", status_code=303)
     return RedirectResponse(url="/admin/login", status_code=303)
+
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+def session_options() -> dict:
+    """SessionMiddleware settings shared by every app that serves the GUI."""
+    return {
+        "secret_key": settings.session_secret_key,
+        "max_age": SESSION_MAX_AGE,
+        "same_site": "lax",  # sent on the top-level navigation from a mail link, not on cross-site posts
+        "https_only": settings.session_cookie_secure,
+    }
 
 
 def register(app: FastAPI) -> None:
     app.include_router(router)
+    app.include_router(public_router)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     app.add_exception_handler(NotAuthenticated, _handle_not_authenticated)
+    security.register(app)

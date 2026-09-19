@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     # won't survive a restart. Set a fixed value in .env for persistent
     # sessions across restarts/deploys.
     session_secret_key: str = Field(default_factory=lambda: secrets.token_hex(32))
+    # Mark the session cookie Secure (only sent over HTTPS). Set true as soon as
+    # the GUI is served over HTTPS (behind a reverse proxy); left false, a
+    # plain-http LAN address keeps working. Console-only, like all security settings.
+    session_cookie_secure: bool = False
+    # The public address of the GUI (what FEEDBACK_BASE_URL is in the mail), e.g.
+    # https://trend.example.com. Used to accept form posts from that origin when
+    # a reverse proxy rewrites the Host header. Empty = only the Host header.
+    public_base_url: str = ""
 
     # Base URL of the scheduler's small internal trigger server (see
     # scheduler/trigger_server.py), used only by the admin GUI's "verstuur nu"

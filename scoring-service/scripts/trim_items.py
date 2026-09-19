@@ -4,6 +4,9 @@ Nothing in the service ever deletes items, so the table only grows. This is
 for a deliberate fresh start — NOT something to run on every build or
 startup, which would delete items on every deploy.
 
+Duplicates (the same article stored more than once, see app/dedupe.py) are
+collapsed first: only the best-ranked copy is a candidate, its twins are removed.
+
 Which items stay, in this order of priority:
   1. items that have feedback (that is the training signal for scoring),
   2. market developments ("markt", see app/classification.py) — the digest
@@ -25,8 +28,9 @@ import argparse
 
 from sqlalchemy.orm import Session, load_only
 
-from app import classification, models
+from app import classification, dedupe, models
 from app.database import SessionLocal
+from app.textclean import clean_text
 
 DEFAULT_KEEP = 50
 _DELETE_CHUNK = 500  # keep IN (...) lists well below database parameter limits
@@ -36,16 +40,27 @@ def select_ids_to_keep(db: Session, keep: int) -> tuple[list[int], list[int]]:
     """Return (ids_to_keep, ids_to_delete). Pure selection, deletes nothing."""
     with_feedback = {row[0] for row in db.query(models.Feedback.item_id).distinct().all()}
     items = db.query(models.Item).options(
-        load_only(models.Item.id, models.Item.title, models.Item.summary)  # skip raw_content/embedding
+        # skip raw_content/embedding
+        load_only(
+            models.Item.id, models.Item.title, models.Item.summary,
+            models.Item.url, models.Item.source, models.Item.source_id,
+        )
     ).all()
 
     def priority(item: models.Item) -> tuple[bool, bool, int]:
-        is_market = classification.classify(item.title, item.summary or "") == "markt"
+        is_market = classification.classify(clean_text(item.title), clean_text(item.summary)) == "markt"
         # False sorts before True, so negate: feedback first, then market, then newest (highest id).
         return (item.id not in with_feedback, not is_market, -item.id)
 
     ranked = sorted(items, key=priority)
-    return [i.id for i in ranked[:keep]], [i.id for i in ranked[keep:]]
+
+    # The same article stored more than once is kept once (the best-ranked copy,
+    # so one with feedback wins); its twins always go, whatever `keep` is.
+    deduper = dedupe.Deduper()
+    unique = [item for item in ranked if not deduper.is_duplicate(item)]
+    unique_ids = {item.id for item in unique}
+    duplicate_ids = [item.id for item in ranked if item.id not in unique_ids]
+    return [i.id for i in unique[:keep]], [i.id for i in unique[keep:]] + duplicate_ids
 
 
 def delete_items(db: Session, item_ids: list[int]) -> None:

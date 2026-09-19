@@ -1,12 +1,12 @@
 """Endpoints added specifically so the scheduler never needs direct DB access:
-GET /feedback-link, GET /items/recent-feedback, POST /sources/evaluate-all.
+GET /items/recent-feedback, POST /sources/evaluate-all.
 """
 
 from uuid import uuid4
 
 
 def _score(client, raw_content: str = "Some security article content.", source_id: int | None = None) -> dict:
-    payload = {"source": "test", "title": "T", "url": f"http://example.com/{uuid4().hex}", "raw_content": raw_content}
+    payload = {"source": "test", "title": f"T {uuid4().hex[:8]}", "url": f"http://example.com/{uuid4().hex}", "raw_content": raw_content}
     if source_id is not None:
         payload["source_id"] = source_id
     resp = client.post("/score", json=payload)
@@ -14,27 +14,27 @@ def _score(client, raw_content: str = "Some security article content.", source_i
     return resp.json()
 
 
-def test_feedback_link_records_same_change_as_post_feedback(client):
+def test_old_feedback_link_only_redirects_to_the_login_and_records_nothing(client, db_session):
+    """Mails sent before the digest pages existed still carry /feedback-link URLs.
+    They must not change anything by themselves (a mail scanner may fetch them):
+    they send the visitor through the login to /admin/vote-link."""
+    from app import models
+
     scored = _score(client)
 
     resp = client.get(
-        "/feedback-link",
-        params={"item_id": scored["item_id"], "label": "interessant"},
+        "/feedback-link", params={"item_id": scored["item_id"], "label": "interessant"}, follow_redirects=False
     )
-    assert resp.status_code == 200
-    assert "text/html" in resp.headers["content-type"]
-    assert "Bedankt" in resp.text
 
-    # Same DB effect as POST /feedback: a duplicate POST/GET both just add feedback rows,
-    # so the most direct proof is that the item is now treated as "liked" by scoring.
-    scored_similar = _score(client, "Some security article content, closely related.")
-    assert scored_similar["relevance_score"] > 0.5
+    assert resp.status_code == 303
+    assert resp.headers["location"] == f"/admin/vote-link?item_id={scored['item_id']}&label=interessant"
+    assert db_session.query(models.Feedback).count() == 0
 
 
-def test_feedback_link_unknown_item_returns_404_html_not_json(client):
-    resp = client.get("/feedback-link", params={"item_id": 999999, "label": "interessant"})
-    assert resp.status_code == 404
-    assert "text/html" in resp.headers["content-type"]
+def test_old_feedback_link_rejects_an_unknown_label(client):
+    resp = client.get("/feedback-link", params={"item_id": 1, "label": "misschien"}, follow_redirects=False)
+
+    assert resp.status_code == 422
 
 
 def test_recent_feedback_items_filters_by_label_and_window(client):
@@ -46,7 +46,7 @@ def test_recent_feedback_items_filters_by_label_and_window(client):
     resp = client.get("/items/recent-feedback", params={"label": "interessant", "days": 30})
     assert resp.status_code == 200
     titles = [item["title"] for item in resp.json()]
-    assert "T" in titles
+    assert len(titles) == 1 and titles[0].startswith("T ")  # only the liked one, not the disliked
     assert all("summary" in item for item in resp.json())
 
     resp_old_window = client.get("/items/recent-feedback", params={"label": "interessant", "days": 0})

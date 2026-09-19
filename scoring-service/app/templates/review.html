@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Beoordelen{% endblock %}
+{% block container_class %}narrow{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Beoordelen</h1>
+    <p class="sub">Geef snel een 👍 of 👎 op opgeslagen artikelen, los van de digests.</p>
+  </div>
+</div>
+
+<p class="hint">
+  Elk duimpje wordt een referentiepunt voor de scores (markt en nieuws leren los van elkaar). Alleen de bovenste
+  kaart is actief. Overslaan telt niet mee voor de scores.
+</p>
+<div class="shortcuts" aria-label="Sneltoetsen">
+  <span><kbd>y</kbd> of <kbd>→</kbd> 👍 interessant</span>
+  <span><kbd>n</kbd> of <kbd>←</kbd> 👎 niet interessant</span>
+  <span><kbd>s</kbd> of <kbd>↓</kbd> overslaan</span>
+  <span><kbd>u</kbd> ongedaan maken</span>
+</div>
+
+<div class="tabs">
+  {% for key, label in (("markt", "Markt"), ("nieuws", "Nieuws"), ("alles", "Alles")) %}
+  <a href="/admin/review?category={{ key }}" class="tab {{ 'active' if category == key }}">
+    {{ label }}
+    {% if key == "alles" %}<small>{{ waiting.markt + waiting.nieuws }} te doen</small>
+    {% else %}<small>{{ waiting[key] }} te doen · 👍 {{ given[key].interessant }} · 👎 {{ given[key].niet_interessant }}</small>{% endif %}
+  </a>
+  {% endfor %}
+</div>
+
+{% if updated is not none %}<p class="success">Scores bijgewerkt: {{ updated }} item(s) kregen een andere score.</p>{% endif %}
+
+<div id="cards" data-category="{{ category }}">
+{% for card in cards %}
+<article class="item-card active-card" data-id="{{ card.id }}">
+  <h3 class="item-title"><a href="{{ card.url }}" target="_blank" rel="noopener noreferrer">{{ card.title }}</a></h3>
+  <div class="item-meta">
+    <span>{{ card.source }}</span>
+    <span class="badge badge-{{ card.category }}">{{ card.category }}</span>
+    <span>score {{ "%.2f"|format(card.score) }}</span>
+    <span>{{ card.created.strftime("%Y-%m-%d") }}</span>
+  </div>
+  <p class="item-summary">{{ card.summary or "(geen samenvatting)" }}</p>
+  <form method="post" action="/admin/review/{{ card.id }}" class="vote-row">
+    <input type="hidden" name="category" value="{{ category }}">
+    <button type="submit" name="action" value="like" class="btn vote-btn">👍 Interessant</button>
+    <button type="submit" name="action" value="dislike" class="btn vote-btn">👎 Niet interessant</button>
+    <button type="submit" name="action" value="skip" class="btn vote-btn">⏭ Overslaan</button>
+  </form>
+</article>
+{% endfor %}
+</div>
+
+<div id="empty" class="card empty" {% if cards %}hidden{% endif %}>
+  <h2>Niets meer te beoordelen{% if category != "alles" %} in deze categorie{% endif %}</h2>
+  <p>Zodra er nieuwe artikelen zijn ingelezen, verschijnen ze hier.</p>
+</div>
+
+<form method="post" action="/admin/review/rescore" class="mt-1">
+  <input type="hidden" name="category" value="{{ category }}">
+  <button type="submit" class="btn">Scores bijwerken</button>
+  <span class="hint">
+    Berekent de scores van de opgeslagen items opnieuw met je duimpjes (geen Voyage-aanroepen). Gebeurt ook
+    automatisch na elke ingest-run en zodra deze lijst leeg is.
+  </span>
+</form>
+{% endblock %}
+{% block scripts %}<script src="/static/review.js" defer></script>{% endblock %}

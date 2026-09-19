@@ -31,7 +31,7 @@ def _create_source(client, url: str = "https://newblog.example.com", type_: str 
 def _score(client, raw_content: str, source_id: int | None = None, title: str = "T") -> dict:
     payload = {
         "source": "test",
-        "title": title,
+        "title": f"{title} {uuid4().hex[:8]}",
         "url": f"http://example.com/{uuid4().hex}",
         "raw_content": raw_content,
     }

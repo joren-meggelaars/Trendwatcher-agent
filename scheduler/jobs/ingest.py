@@ -125,6 +125,22 @@ def score_entry(client: httpx.Client, entry: dict, source: dict) -> dict:
     raise AssertionError("unreachable")  # loop always returns or raises
 
 
+def rescore(client: httpx.Client) -> int | None:
+    """Ask the scoring-service to recompute stored items' scores against the
+    current 👍/👎 (from the stored embeddings: no Voyage requests, and a no-op
+    while the thumbs are unchanged). Runs after every ingest, so a thumb given
+    in the mail or on the review page reaches items scored before it. Returns
+    how many items changed, or None when it could not be done — that never
+    fails the ingest."""
+    try:
+        resp = client.post(f"{config.SCORING_SERVICE_URL}/items/rescore", timeout=300.0)
+        resp.raise_for_status()
+        return resp.json()["updated"]
+    except (httpx.HTTPError, KeyError, ValueError):
+        logger.warning("Kon de scores niet opnieuw laten berekenen; volgende ingest-run probeert het weer.", exc_info=True)
+        return None
+
+
 def run() -> None:
     seen = SeenItemsCache.load()
     scored = failed = 0
@@ -160,10 +176,15 @@ def run() -> None:
                 # After every source, not only at the end: a long run that is
                 # interrupted (deploy, restart) keeps the progress it made.
                 seen.save()
+
+            rescored = rescore(client)
     finally:
         seen.save()
 
-    logger.info("Ingest klaar: %d item(s) gescoord, %d mislukt.", scored, failed)
+    logger.info(
+        "Ingest klaar: %d item(s) gescoord, %d mislukt%s.",
+        scored, failed, "" if rescored is None else f", {rescored} score(s) bijgewerkt door feedback",
+    )
 
 
 if __name__ == "__main__":

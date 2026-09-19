@@ -29,6 +29,23 @@ from app.database import Base, get_db
 from app.main import app
 
 
+@pytest.fixture(autouse=True)
+def _fresh_login_throttle():
+    """Wrong-password counters are per process; every test starts unlocked."""
+    from app import security
+
+    security.login_throttle = security.LoginThrottle()
+
+
+@pytest.fixture(autouse=True)
+def _forget_last_rescore():
+    """rescore_recent skips when the thumbs look unchanged since its last call
+    in this process; every test starts with its own database."""
+    from app import scoring
+
+    scoring._last_rescore_signature = None
+
+
 def _make_test_engine():
     """SQLite by default (fast, no server needed); a real Postgres engine when
     DATABASE_URL is pointed at one (e.g. docker compose / the VM deployment),

@@ -18,8 +18,9 @@ _DIGEST_ITEM = {
 def test_build_digest_html_links_article_and_source():
     html_out = daily_digest.build_digest_html({"markt": [_DIGEST_ITEM]})
 
-    assert '<a href="https://example.com/article">Kritieke kwetsbaarheid ontdekt</a>' in html_out
-    assert '<a href="https://example.com/feed">Example Security Blog</a>' in html_out
+    assert 'href="https://example.com/article"' in html_out and ">Kritieke kwetsbaarheid ontdekt</a>" in html_out
+    assert "Example Security Blog" in html_out  # the source, as text next to the score
+    assert "score 0.87" in html_out
 
 
 def test_build_digest_html_uses_thumbs_for_feedback_links():
@@ -150,14 +151,14 @@ def test_build_digest_html_has_a_section_per_category_in_order():
     )
 
     assert html_out.index("Marktontwikkeling") < html_out.index("Marktitem")
-    assert html_out.index("Marktitem") < html_out.index("Nieuws</h2>")
-    assert html_out.index("Nieuws</h2>") < html_out.index("Nieuwsitem")
+    assert html_out.index("Marktitem") < html_out.index("Nieuws<span")  # the heading, not the item title
+    assert html_out.index("Nieuws<span") < html_out.index("Nieuwsitem")
 
 
 def test_build_digest_html_says_so_when_a_category_is_empty():
     html_out = daily_digest.build_digest_html({"markt": [_DIGEST_ITEM]})
 
-    assert "Nieuws</h2><p>Geen nieuwe items in deze categorie.</p>" in html_out
+    assert html_out.index("Nieuws<span") < html_out.index("Geen nieuwe items in deze categorie.")
 
 
 def _patch_run_now(monkeypatch, items_by_category, top_n=5):
@@ -177,7 +178,15 @@ def _patch_run_now(monkeypatch, items_by_category, top_n=5):
         captured["requests"].append((url, params))
         return _Resp(items_by_category.get(params["category"], []))
 
+    class _Recorded:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self):
+            return {"digest_id": 42}
+
     monkeypatch.setattr(daily_digest.httpx, "get", _fake_get)
+    monkeypatch.setattr(daily_digest.httpx, "post", lambda *a, **k: _Recorded())  # recording the digest
     monkeypatch.setattr(daily_digest, "fetch_digest_settings", lambda: {"digest_top_n": top_n})
     monkeypatch.setattr(daily_digest, "send_digest", lambda html_body: captured.__setitem__("html", html_body))
     return captured
@@ -199,8 +208,8 @@ def test_run_now_mails_top_items_per_category_without_scoring(monkeypatch):
     html_out = captured["html"]
     assert "Acme overname" in html_out and "Kritieke bug" in html_out
     assert html_out.index("Acme overname") < html_out.index("Kritieke bug")
-    assert "example.com</a>" in html_out  # derived source name
-    assert "item_id=7&amp;label=interessant" in html_out
+    assert "example.com &nbsp;" in html_out  # derived source name, shown as text
+    assert "/admin/digest/42?vote=7:like" in html_out
 
 
 def test_run_now_still_sends_when_only_one_category_has_items(monkeypatch):
@@ -232,3 +241,54 @@ def test_run_now_sends_nothing_when_scoring_service_unreachable(monkeypatch):
     daily_digest.run_now()
 
     assert sent == []
+
+
+# --- the look of the mail ---------------------------------------------------------------------
+
+
+def test_the_mail_is_built_from_tables_with_inline_styles_and_has_no_scripts():
+    html_out = daily_digest.build_digest_html({"markt": [_DIGEST_ITEM], "nieuws": [_DIGEST_ITEM]}, digest_id=5)
+
+    assert 'role="presentation"' in html_out and "<table" in html_out
+    assert "<script" not in html_out.lower()
+    assert "display:flex" not in html_out and "grid" not in html_out  # Outlook desktop would ignore them
+    assert 'bgcolor="#4f46e5"' in html_out  # header colour as an attribute too, for Outlook
+
+
+def test_the_mail_supports_dark_mode_and_a_small_screen():
+    html_out = daily_digest.build_digest_html({"markt": [_DIGEST_ITEM]})
+
+    assert "prefers-color-scheme: dark" in html_out
+    assert 'name="color-scheme"' in html_out
+    assert "max-width: 520px" in html_out
+
+
+def test_the_header_shows_the_date_in_dutch_and_what_is_in_the_digest():
+    from datetime import datetime, timezone
+
+    html_out = daily_digest.build_digest_html(
+        {"markt": [_DIGEST_ITEM, _DIGEST_ITEM], "nieuws": [_DIGEST_ITEM]},
+        when=datetime(2026, 9, 19, 7, 0, tzinfo=timezone.utc),
+    )
+
+    assert "19 september 2026" in html_out
+    assert "2 marktontwikkeling" in html_out and "1 nieuws" in html_out
+    assert "Dagelijkse digest" in html_out
+
+
+def test_every_item_gets_both_buttons_pointing_at_its_own_vote(monkeypatch):
+    monkeypatch.setattr(config, "FEEDBACK_BASE_URL", "https://trend.example.com")
+    html_out = daily_digest.build_digest_html({"markt": [_DIGEST_ITEM]}, digest_id=9)
+
+    assert "https://trend.example.com/admin/digest/9?vote=1:like" in html_out
+    assert "https://trend.example.com/admin/digest/9?vote=1:dislike" in html_out
+    assert "Interessant" in html_out and "Niet interessant" in html_out
+
+
+def test_an_item_without_a_summary_still_renders_and_a_non_http_link_is_defused():
+    item = {**_DIGEST_ITEM, "summary": "", "url": "javascript:alert(1)"}
+
+    html_out = daily_digest.build_digest_html({"markt": [item]})
+
+    assert "javascript:" not in html_out
+    assert "Kritieke kwetsbaarheid ontdekt" in html_out

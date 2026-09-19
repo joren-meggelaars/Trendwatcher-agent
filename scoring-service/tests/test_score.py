@@ -18,7 +18,7 @@ PHISHING = (
 def _score(client, raw_content: str, title: str = "T"):
     resp = client.post(
         "/score",
-        json={"source": "test", "title": title, "url": f"http://example.com/{uuid4().hex}", "raw_content": raw_content},
+        json={"source": "test", "title": f"{title} {uuid4().hex[:8]}", "url": f"http://example.com/{uuid4().hex}", "raw_content": raw_content},
     )
     assert resp.status_code == 200
     return resp.json()

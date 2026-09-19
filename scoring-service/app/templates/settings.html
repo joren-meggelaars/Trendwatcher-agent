@@ -1,39 +1,42 @@
 {% extends "base.html" %}
-{% block title %}Digest-instellingen — Trendwatcher Admin{% endblock %}
+{% block title %}Digest-instellingen{% endblock %}
+{% block container_class %}narrow{% endblock %}
 {% block content %}
-<h1>Digest-instellingen</h1>
+<div class="page-head">
+  <div>
+    <h1>Digest-instellingen</h1>
+    <p class="sub">Wanneer de digest wordt verstuurd en hoeveel items erin staan.</p>
+  </div>
+</div>
 
 {% if saved %}<p class="success">Instellingen opgeslagen.</p>{% endif %}
 {% if sent %}<p class="success">{{ sent }}</p>{% endif %}
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
-<div class="add-form">
-  <h2 style="margin-top:0">Frequentie en inhoud</h2>
+<div class="card card-pad">
+  <h2 class="mt-0">Frequentie en inhoud</h2>
   <form method="post" action="/admin/settings">
-    <p>
-      <label>Uur van de dag (0-23)<br>
-        <input type="number" name="digest_hour" min="0" max="23" value="{{ settings.digest_hour }}" style="width:6rem">
-      </label>
-    </p>
-    <p>
-      <label>Aantal items per categorie (marktontwikkeling en nieuws elk)<br>
-        <input type="number" name="digest_top_n" min="1" max="50" value="{{ settings.digest_top_n }}" style="width:6rem">
-      </label>
-    </p>
-    <button type="submit">Opslaan</button>
+    <div class="field">
+      <label for="digest_hour">Uur van de dag (0-23)</label>
+      <input id="digest_hour" type="number" name="digest_hour" min="0" max="23" value="{{ settings.digest_hour }}" size="6">
+    </div>
+    <div class="field">
+      <label for="digest_top_n">Aantal items per categorie (marktontwikkeling en nieuws elk)</label>
+      <input id="digest_top_n" type="number" name="digest_top_n" min="1" max="50" value="{{ settings.digest_top_n }}" size="6">
+    </div>
+    <button type="submit" class="btn btn-primary">Opslaan</button>
   </form>
-  <p style="color:#666; font-size:0.85rem;">
-    Het aantal items geldt vanaf de eerstvolgende run. Een gewijzigd uur wordt
-    binnen enkele minuten door de scheduler overgenomen (geen herstart nodig).
-    Laatst gewijzigd: {{ settings.updated_at.strftime("%Y-%m-%d %H:%M") }}.
+  <p class="hint mt-1">
+    Het aantal items geldt vanaf de eerstvolgende run. Een gewijzigd uur wordt binnen enkele minuten door de
+    scheduler overgenomen (geen herstart nodig). Laatst gewijzigd: {{ settings.updated_at.strftime("%Y-%m-%d %H:%M") }}.
   </p>
 </div>
 
-<div class="add-form">
-  <h2 style="margin-top:0">Nu versturen</h2>
-  <form method="post" action="/admin/settings/send-now"
-        onsubmit="return confirm('Nu direct een digest samenstellen en versturen?');">
-    <button type="submit">Verstuur digest nu</button>
+<div class="card card-pad">
+  <h2 class="mt-0">Nu versturen</h2>
+  <p class="muted">Mailt direct een digest met de beste recent gescoorde items. Een voorbeeld: het telt niet mee voor de dagelijkse digest.</p>
+  <form method="post" action="/admin/settings/send-now" data-confirm="Nu direct een digest samenstellen en versturen?">
+    <button type="submit" class="btn">Verstuur digest nu</button>
   </form>
 </div>
 {% endblock %}

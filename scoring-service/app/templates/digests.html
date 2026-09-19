@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Digests{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Digests</h1>
+    <p class="sub">Elke verstuurde digest, om achteraf te beoordelen.</p>
+  </div>
+</div>
+
+{% if rows %}
+<div class="table-wrap">
+<table>
+<thead><tr><th>Datum</th><th>Soort</th><th>Samenstelling</th><th>Beoordeeld</th><th></th></tr></thead>
+<tbody>
+{% for row in rows %}
+<tr>
+  <td class="nowrap"><a href="/admin/digest/{{ row.id }}"><strong>{{ row.created.strftime("%d-%m-%Y") }}</strong></a>
+      <small>{{ row.created.strftime("%H:%M") }}</small></td>
+  <td>
+    {% if row.kind == "preview" %}<span class="badge badge-muted">voorbeeld</span>{% else %}<span class="badge badge-ok">dagelijks</span>{% endif %}
+    {% if not row.mailed %}<span class="badge badge-warn">niet verstuurd</span>{% endif %}
+  </td>
+  <td><span class="badge badge-markt">{{ row.markt }} markt</span> <span class="badge badge-muted">{{ row.nieuws }} nieuws</span></td>
+  <td>
+    {{ row.voted }} van {{ row.total }}
+    {% if row.voted == row.total and row.total %}<span class="badge badge-ok">klaar</span>{% endif %}
+  </td>
+  <td class="right"><a class="btn btn-sm" href="/admin/digest/{{ row.id }}">Openen</a></td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% else %}
+<div class="card empty">
+  <h2>Nog geen digests</h2>
+  <p>Zodra de eerste digest is samengesteld (of je op "Verstuur digest nu" klikt), verschijnt die hier.</p>
+  <a class="btn btn-primary" href="/admin/review">Ondertussen artikelen beoordelen</a>
+</div>
+{% endif %}
+{% endblock %}

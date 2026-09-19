@@ -4,14 +4,14 @@ from tests.conftest import ADMIN_TEST_PASSWORD, ADMIN_TEST_USERNAME
 def test_unauthenticated_visitor_is_redirected_to_login(client):
     resp = client.get("/admin/sources", follow_redirects=False)
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/admin/login"
+    assert resp.headers["location"].startswith("/admin/login")
 
 
 def test_unauthenticated_items_and_batch_add_also_redirect(client):
     for path in ("/admin/items", "/admin/items/batch-add"):
         resp = client.get(path, follow_redirects=False)
         assert resp.status_code == 303
-        assert resp.headers["location"] == "/admin/login"
+        assert resp.headers["location"].startswith("/admin/login")
 
 
 def test_wrong_password_shows_friendly_error_not_500(client):
@@ -41,11 +41,11 @@ def test_login_then_pages_reachable_then_logout_blocks_again(client):
 
     logout_resp = client.post("/admin/logout", follow_redirects=False)
     assert logout_resp.status_code == 303
-    assert logout_resp.headers["location"] == "/admin/login"
+    assert logout_resp.headers["location"].startswith("/admin/login")
 
     resp = client.get("/admin/sources", follow_redirects=False)
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/admin/login"
+    assert resp.headers["location"].startswith("/admin/login")
 
 
 def test_sources_form_creates_a_new_source_visible_after_reload(admin_client):
@@ -126,7 +126,7 @@ def test_batch_add_flags_a_non_http_url_without_crashing(admin_client):
 def test_settings_page_shows_defaults_when_unauthenticated_redirects(client):
     resp = client.get("/admin/settings", follow_redirects=False)
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/admin/login"
+    assert resp.headers["location"].startswith("/admin/login")
 
 
 def test_settings_page_shows_current_values(admin_client):

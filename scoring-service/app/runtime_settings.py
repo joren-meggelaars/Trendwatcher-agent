@@ -117,6 +117,8 @@ CONSOLE_ONLY: tuple[ConsoleOnly, ...] = (
     ConsoleOnly("GRAPH_TENANT_ID / GRAPH_CLIENT_ID / GRAPH_CLIENT_SECRET", "geheim (Microsoft Graph-inloggegevens)"),
     ConsoleOnly("SEARCH_API_KEY", "geheim (API-sleutel); SEARCH_PROVIDER hoort erbij"),
     ConsoleOnly("ADMIN_USERNAME / ADMIN_PASSWORD_HASH / SESSION_SECRET_KEY", "geheim (toegang tot deze pagina zelf)"),
+    ConsoleOnly("SESSION_COOKIE_SECURE / PUBLIC_BASE_URL",
+                "beveiliging van de login en bepaalt welke site formulieren op deze pagina mag versturen"),
     ConsoleOnly("POSTGRES_USER / POSTGRES_PASSWORD / DATABASE_URL", "geheim (database-toegang)"),
     ConsoleOnly("DIGEST_MAILBOX", "bepaalt namens welke mailbox er verstuurd wordt (Graph-rechten)"),
     ConsoleOnly("DIGEST_TO_EMAIL", "bepaalt waar de digest heen gaat"),

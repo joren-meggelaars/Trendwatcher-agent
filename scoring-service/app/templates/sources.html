@@ -1,56 +1,66 @@
 {% extends "base.html" %}
-{% block title %}Bronnen — Trendwatcher Admin{% endblock %}
+{% block title %}Bronnen{% endblock %}
 {% block content %}
-<h1>Bronnen</h1>
+<div class="page-head">
+  <div>
+    <h1>Bronnen</h1>
+    <p class="sub">{{ sources|length }} bronnen{% if current_status %} met status <strong>{{ current_status }}</strong>{% endif %}. Alleen <em>actieve</em> bronnen worden opgehaald.</p>
+  </div>
+</div>
 
 <div class="add-form">
-  <h2 style="margin-top:0">Nieuwe bron toevoegen</h2>
-  <form method="post" action="/admin/sources">
-    <label>URL <input type="text" name="url" required style="width:22rem"></label>
-    <label>Type <input type="text" name="type" required placeholder="rss, blog, ..." style="width:8rem"></label>
-    <button type="submit">Toevoegen</button>
+  <h2>Nieuwe bron toevoegen</h2>
+  <form method="post" action="/admin/sources" class="form-row">
+    <label>URL <input type="text" name="url" required size="42" placeholder="https://voorbeeld.nl/feed"></label>
+    <label>Type <input type="text" name="type" required placeholder="rss, blog, ..." size="12"></label>
+    <button type="submit" class="btn btn-primary">Toevoegen</button>
   </form>
 </div>
 
-<div class="filters">
-  <strong>Filter op status:</strong>
-  <a href="/admin/sources">alle</a>
+<div class="tabs">
+  <a class="tab {{ 'active' if not current_status }}" href="/admin/sources">alle</a>
   {% for s in statuses %}
-  &middot; <a href="/admin/sources?status={{ s }}">{{ s }}</a>
+  <a class="tab {{ 'active' if current_status == s }}" href="/admin/sources?status={{ s }}">{{ s }}</a>
   {% endfor %}
 </div>
 
+<div class="table-wrap">
 <table>
+<thead>
 <tr>
   <th>ID</th><th>URL</th><th>Type</th><th>Categorie</th><th>Status</th><th>Gem. score</th><th>Items</th><th>Ontdekt via</th><th>Actie</th>
 </tr>
+</thead>
+<tbody>
 {% for source in sources %}
 <tr>
   <td>{{ source.id }}</td>
   <td>
-    <a href="{{ source.url }}" target="_blank" rel="noopener">{{ source.url }}</a>
-    {% if source.notes %}<br><small style="color:#666">{{ source.notes }}</small>{% endif %}
+    <a href="{{ source.url }}" target="_blank" rel="noopener noreferrer">{{ source.url }}</a>
+    {% if source.notes %}<br><small>{{ source.notes }}</small>{% endif %}
   </td>
   <td>{{ source.type }}</td>
-  <td>{{ source.category or "—" }}</td>
+  <td>{% if source.category %}<span class="badge badge-muted">{{ source.category }}</span>{% else %}—{% endif %}</td>
   <td><span class="status status-{{ source.status }}">{{ source.status }}</span></td>
   <td>{{ "%.2f"|format(source.running_avg_score) if source.running_avg_score is not none else "—" }}</td>
   <td>{{ item_counts.get(source.id, 0) }}</td>
   <td>{{ source.discovery_method }}</td>
-  <td>
+  <td class="nowrap">
     <form class="inline" method="post" action="/admin/sources/{{ source.id }}/override-status"
-          onsubmit="return confirm('Status van deze bron handmatig overschrijven naar het gekozen niveau?');">
-      <select name="new_status">
+          data-confirm="Status van deze bron handmatig overschrijven naar het gekozen niveau?">
+      <select name="new_status" aria-label="Nieuwe status">
         {% for s in statuses %}
         <option value="{{ s }}" {% if s == source.status %}selected{% endif %}>{{ s }}</option>
         {% endfor %}
       </select>
-      <button type="submit">Zet status</button>
+      <button type="submit" class="btn btn-sm">Zet status</button>
     </form>
   </td>
 </tr>
 {% else %}
-<tr><td colspan="9">Geen bronnen gevonden.</td></tr>
+<tr><td colspan="9" class="muted">Geen bronnen gevonden.</td></tr>
 {% endfor %}
+</tbody>
 </table>
+</div>
 {% endblock %}

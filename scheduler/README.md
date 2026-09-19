@@ -24,7 +24,12 @@ cp .env.example .env
   `source_id`). Het scoren is het trage, rate-gelimiteerde deel; door het de
   hele dag te laten lopen wacht de digest er niet meer op. De "al gezien"-cache
   wordt na elke bron opgeslagen, dus een onderbroken run raakt zijn voortgang
-  niet kwijt. Een run die langer duurt dan het interval laat de volgende tick
+  niet kwijt. Na de bronnen vraagt de job de scoring-service de scores van
+  opgeslagen items opnieuw te berekenen met je actuele 👍/👎
+  (`POST /items/rescore`, uit de opgeslagen embeddings, zonder Voyage-aanroepen
+  en een no-op zolang de duimpjes gelijk zijn); zo werken ook duimpjes uit de
+  mail door in items die al gescoord waren. Mislukt dat, dan slaagt de ingest
+  gewoon en probeert de volgende run het weer. Een run die langer duurt dan het interval laat de volgende tick
   vervallen (`max_instances=1`).
 - **`jobs/daily_digest.py`** — scoort of haalt **niets** zelf op, maar mailt wat
   `ingest` al gescoord heeft: per categorie (de scoring-service geeft elk item
@@ -32,8 +37,14 @@ cp .env.example .env
   top-N beste items van de laatste `DIGEST_LOOKBACK_DAYS` dagen die nog niet
   gemaild zijn (`GET /items/top?undigested=true`). De HTML-digest heeft twee
   secties: **Marktontwikkeling** en **Nieuws**, elk apart gescoord op jouw
-  👍/👎 binnen díe categorie. Per item staan twee feedback-links
-  (`GET /feedback-link?item_id=...&label=...`). Verzonden via de Microsoft
+  👍/👎 binnen díe categorie. De digest wordt eerst vastgelegd in de
+  scoring-service (`POST /digests`: welke items erin zitten), en de knoppen 👍/👎
+  per item en "Open de digest" in de mail openen `FEEDBACK_BASE_URL/admin/digest/<id>`
+  in de web-GUI (na inloggen, waar de stem wordt vastgelegd). Lukt het vastleggen
+  niet, dan gebruikt de mail de oude `/feedback-link`-knoppen, die ook via de login
+  lopen. De mail zelf is tabel-gebaseerd met inline stijlen (werkt in Outlook
+  desktop en web en op een telefoon), met donkere modus waar de app dat ondersteunt.
+  Verzonden via de Microsoft
   Graph `sendMail`-API (`POST /users/{DIGEST_MAILBOX}/sendMail`, zie
   `graph_client.py`); daarna worden precies die items als gemaild gemarkeerd
   (`POST /items/mark-digested`), zodat de volgende digest verder kijkt. Bij een

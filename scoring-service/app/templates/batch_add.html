@@ -1,18 +1,27 @@
 {% extends "base.html" %}
-{% block title %}Batch-toevoegen — Trendwatcher Admin{% endblock %}
+{% block title %}Batch-toevoegen{% endblock %}
 {% block content %}
-<h1>Batch-toevoegen via URL's</h1>
+<div class="page-head">
+  <div>
+    <h1>Batch-toevoegen via URL's</h1>
+    <p class="sub">Plak artikel-URL's; elke pagina wordt opgehaald en gescoord alsof hij uit een feed kwam.</p>
+  </div>
+</div>
+
 <form method="post" action="/admin/items/batch-add" class="add-form">
-  <p><label>Eén URL per regel<br>
-    <textarea name="urls" rows="10" cols="70" placeholder="https://example.com/artikel-1&#10;https://example.com/artikel-2"></textarea>
-  </label></p>
-  <button type="submit">Verwerken</button>
+  <div class="field">
+    <label for="urls">Eén URL per regel</label>
+    <textarea id="urls" name="urls" rows="9" placeholder="https://example.com/artikel-1&#10;https://example.com/artikel-2"></textarea>
+  </div>
+  <button type="submit" class="btn btn-primary">Verwerken</button>
 </form>
 
 {% if results is not none %}
 <h2>Resultaat ({{ results|selectattr("ok")|list|length }} gelukt, {{ results|rejectattr("ok")|list|length }} mislukt)</h2>
+<div class="table-wrap">
 <table>
-<tr><th>URL</th><th>Status</th><th>Titel / reden</th><th>Score</th></tr>
+<thead><tr><th>URL</th><th>Status</th><th>Titel / reden</th><th>Score</th></tr></thead>
+<tbody>
 {% for r in results %}
 <tr>
   <td>{{ r.url }}</td>
@@ -24,6 +33,8 @@
   <td>{{ "%.2f"|format(r.score) if r.ok else "—" }}</td>
 </tr>
 {% endfor %}
+</tbody>
 </table>
+</div>
 {% endif %}
 {% endblock %}

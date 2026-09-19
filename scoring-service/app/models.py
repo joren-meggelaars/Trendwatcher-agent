@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
 
@@ -102,6 +102,36 @@ class DigestSettings(Base):
     digest_hour: Mapped[int] = mapped_column(Integer, default=7)
     digest_top_n: Mapped[int] = mapped_column(Integer, default=5)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class Digest(Base):
+    """One digest as it was put together: which items went into it. The mail's
+    links point at /admin/digest/<id>, so the page shows exactly that digest,
+    not "the best items right now"."""
+
+    __tablename__ = "digests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    kind: Mapped[str] = mapped_column(String, default="daily")  # "daily" | "preview" (the "verstuur nu" button)
+    mailed: Mapped[bool] = mapped_column(Boolean, default=False)  # False: dry run, or the send failed
+
+    entries: Mapped[list["DigestItem"]] = relationship(
+        back_populates="digest", order_by="DigestItem.position", cascade="all, delete-orphan"
+    )
+
+
+class DigestItem(Base):
+    __tablename__ = "digest_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    digest_id: Mapped[int] = mapped_column(ForeignKey("digests.id"), index=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.id"), index=True)
+    category: Mapped[str] = mapped_column(String)  # "markt" | "nieuws", as it was in the mail
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+    digest: Mapped["Digest"] = relationship(back_populates="entries")
+    item: Mapped["Item"] = relationship()
 
 
 class RuntimeSetting(Base):

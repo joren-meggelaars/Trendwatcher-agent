@@ -32,11 +32,24 @@ opstarten automatisch aangemaakt (`Base.metadata.create_all`, idempotent).
   `raw_content` worden automatisch als kandidaat-bron geregistreerd (zie
   hieronder); dit verandert niets aan de response. Een al opgeslagen `url`
   geeft het bestaande item terug (geen duplicaat, geen nieuwe embedding).
-  `category` is `"markt"` (funding, overnames, marktcijfers) of `"nieuws"`,
-  bepaald met trefwoorden op titel + samenvatting (`app/classification.py`).
+  `category` is `"markt"` of `"nieuws"`. Markt is wat nieuw is of verandert in
+  de securitymarkt: innovaties, nieuwe producten en diensten, nieuwe
+  ontwikkelingen (trends, nieuwe spelers, nieuwe protocollen en standaarden) én
+  de zakelijke kant (overnames, funding, marktcijfers, analistenrapporten).
+  Nieuws is de rest: incidenten, kwetsbaarheden, patches, advisories,
+  threat research. Bepaald met trefwoorden op titel + samenvatting
+  (`app/classification.py`), met een contextcontrole: "launches" of "releases"
+  in een aanvals- of patchverhaal ("hackers launch new campaign", "Apple
+  releases new version to fix a zero-day") telt niet als productnieuws.
+  Titel en samenvatting worden als platte tekst opgeslagen (`app/textclean.py`:
+  HTML-tags weg, ook dubbel gecodeerde entiteiten als `&amp;quot;` gedecodeerd,
+  WordPress' "The post … appeared first on …"-regel weggehaald). Hetzelfde
+  artikel wordt niet twee keer bewaard: zelfde URL (ook met tracking-parameters)
+  of dezelfde titel van dezelfde bron (`app/dedupe.py`).
 - `GET /items/top?days=7&limit=5&category=markt|nieuws` — beste al gescoorde
   items, hoogste score eerst; met `category` wordt eerst gefilterd en pas
-  daarna gelimiteerd.
+  daarna gelimiteerd. Een artikel dat toch dubbel in de database staat komt er
+  één keer uit, en tekst komt schoon terug (ook voor oudere items).
 
 ### Hoe de score tot stand komt
 
@@ -50,9 +63,16 @@ dichtstbijzijnde 👎-item`
 
 waarbij elke kant neutraal (0,5) is zolang er nog geen feedback van die soort
 is, en nabijheid de cosine-similarity is, herschaald naar 0–1. Zonder
-feedback is elke score dus 0,5. De score wordt één keer berekend, bij het
-scoren; bestaande items worden niet opnieuw gescoord als je later feedback
-geeft.
+feedback is elke score dus 0,5.
+
+Een score wordt berekend bij het scoren, en daarna **opnieuw** zodra je
+feedback verandert, zodat een duimpje ook al opgeslagen items verplaatst:
+`POST /items/rescore?days=30` rekent de items van de laatste 30 dagen opnieuw
+uit met de opgeslagen embeddings (dus zonder Voyage-aanroepen; ook
+`running_avg_score` van de bronnen wordt bijgewerkt). De scheduler roept dit aan
+na elke ingest-run, de beoordeel-pagina bij een lege lijst en met de knop
+"Scores bijwerken". Het doet niets zolang de duimpjes niet veranderd zijn.
+"Overgeslagen" items (beoordeel-pagina) tellen niet mee.
 - `POST /feedback` — `{item_id, label: "interessant" | "niet_interessant"}` →
   `{status: "ok"}`, of een `404` als `item_id` niet bestaat.
 - `POST /sources` — `{url, type, discovery_method?}` → nieuwe `Source` met
@@ -68,21 +88,52 @@ geeft.
   met status `"kandidaat"` of `"actief"` in één keer, en retourneert alleen
   de bronnen waarvan de status daadwerkelijk wijzigde:
   `[{source_id, url, old_status, new_status}, ...]`.
-- `GET /feedback-link?item_id=X&label=...` — functioneel identiek aan
-  `POST /feedback` (zelfde databasewijziging), maar bereikbaar via een simpele
-  klikbare GET-link en retourneert een kleine HTML-bevestigingspagina in
-  plaats van JSON. Bedoeld voor feedback-links in e-mails (zie `scheduler/`).
+- `GET /feedback-link?item_id=X&label=...` — de 👍/👎-link uit mails van vóór de
+  digest-pagina's. Legt **niets** meer vast (een mailscanner of link-preview kan
+  zo'n GET ophalen): stuurt door naar `/admin/vote-link`, dus via de login naar
+  de digest waar het item in zat. Zit ook in de publieke `web`-app.
+- `POST /digests` `{kind, items: [{item_id, category}]}` en
+  `POST /digests/{id}/mailed` — de scheduler legt vast welke items een digest
+  bevat (vóór het mailen), zodat de knoppen in de mail naar precies die digest
+  wijzen, en markeert hem als verstuurd.
 - `GET /items/recent-feedback?label=...&days=...` — `title` + `summary` van
   items die in de afgelopen `days` dagen met `label` zijn gemarkeerd. Laat de
   scheduler kernonderwerpen destilleren zonder rechtstreekse DB-toegang.
 
-## Lokale admin-GUI (/admin/*)
+## Admin-GUI (/admin/*)
 
-Server-rendered (Jinja2, geen React/build-stap) beheerinterface, direct in
-deze FastAPI-app maar volledig gescheiden van de JSON-API hierboven
-(`/score`, `/feedback`, `/sources` blijven puur JSON). Uitsluitend bedoeld
-voor lokaal/intern netwerkgebruik — geen internetblootstelling, geen zware
-auth.
+Server-rendered (Jinja2, geen React/build-stap) beheerinterface met een eigen
+ontwerp (`app/static/app.css`: licht/donker naar je systeem, zijbalk op een
+scherm, menu op een telefoon; geen externe bibliotheken). Alle scripts staan in
+`app/static/*.js` en de pagina's hebben geen inline code, zodat een strikte
+Content-Security-Policy kan.
+
+**Twee apps, één codebase.** `app.main` is de interne JSON-API
+(`/score`, `/feedback`, `/sources`, ... zonder login; die bevat de GUI ook, voor
+lokaal ontwikkelen). `app.web` is **alleen de GUI**: zonder enige API-route en
+zonder `/docs`. In docker-compose draait `web` als eigen container en is dat het
+enige dat naar buiten wordt gepubliceerd; wat niet in de app zit, kan niet worden
+bereikt, ook niet bij een verkeerd ingestelde reverse proxy. Zie DEPLOY.md voor
+HTTPS en toegang van buitenaf.
+
+**Beveiliging** (`app/security.py`, `app/auth.py`): bcrypt-wachtwoord; 5
+verkeerde pogingen per adres blokkeren dat adres 15 minuten; sessies met een
+verloopdatum (12 uur, of 30 dagen met "onthoud mij"; elke login start een nieuwe
+sessie); posts naar `/admin/*` van een andere site worden geweigerd (Origin- of
+Referer-controle, aanvullend op SameSite=Lax); Content-Security-Policy, geen
+framing, geen caching van admin-pagina's; `?next=` na de login mag alleen een pad
+in `/admin` zijn. `SESSION_COOKIE_SECURE` en `PUBLIC_BASE_URL` (`.env`) horen bij
+HTTPS.
+
+- `GET /admin/digests` en `GET /admin/digest/<id>` — het archief van digests en
+  één digest zoals hij is gemaild (secties markt en nieuws), met je huidige
+  👍/👎. Op die pagina kun je alles beoordelen zonder weg te navigeren: klik op een
+  knop om te stemmen, nogmaals om het antwoord te wissen, of ongedaan te maken uit
+  de melding. `POST /admin/vote/{item_id}` (`like`/`dislike`/`clear`) zet je ene
+  antwoord voor dat item en geeft het vorige terug. **De knoppen in de mail**
+  openen `/admin/digest/<id>?vote=<item>:<like|dislike>`: niet ingelogd, dan eerst
+  de login (en daarna terug), en de pagina legt die stem zelf vast met een POST,
+  niet via de link. `/admin/digest/latest` gaat naar de nieuwste.
 
 Setup (eenmalig):
 
@@ -104,6 +155,18 @@ uv run python -m scripts.hash_admin_password   # genereert een bcrypt-hash
   elke URL wordt opgehaald, van HTML ontdaan en gescoord via dezelfde
   `score_and_store()`-functie die ook achter `POST /score` zit. Toont per
   URL succes (titel + score) of falen (reden).
+- `GET /admin/review` — **Beoordelen**: opgeslagen artikelen één voor één
+  aangeboden voor een 👍/👎 (of overslaan), los van de digests, om snel initiële
+  feedback te geven. Tabbladen Markt / Nieuws / Alles met per categorie hoeveel
+  er nog te doen zijn en hoeveel duimpjes je al gaf. Aangeboden worden items
+  van de laatste 30 dagen zonder antwoord van jou, zonder dubbelen (ook geen
+  tweeling van iets wat je al beoordeelde), verspreid over bronnen (van elke
+  bron om de beurt de nieuwste) zodat een eerste ronde breed dekt. Zonder
+  JavaScript gewone formulieren; met JavaScript verdwijnt een kaart zonder
+  herladen en werken de toetsen `y`/`→` (👍), `n`/`←` (👎), `s`/`↓` (overslaan)
+  en `u` (ongedaan maken). Een antwoord is één rij feedback (`POST
+  /admin/review/{item_id}`; overslaan = label `overgeslagen`, telt niet mee
+  voor de scores); is de lijst leeg, dan worden de scores bijgewerkt.
 - `GET/POST /admin/config` — **Configuratie**: de instellingen die normaal in
   `.env` staan, bewerkbaar zonder herstart (scorepauze, ingest-interval, dry-run,
   discovery, mailbox-ingest, drempels voor bronnen-instroom/krimp, ...). Een

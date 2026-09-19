@@ -71,6 +71,24 @@ class RuntimeEnvReportResponse(BaseModel):
     stored: int
 
 
+class DigestItemIn(BaseModel):
+    item_id: int
+    category: ItemCategory
+
+
+class DigestCreate(BaseModel):
+    kind: Literal["daily", "preview"] = "daily"
+    items: list[DigestItemIn] = Field(min_length=1, max_length=100)
+
+
+class DigestCreated(BaseModel):
+    digest_id: int
+
+
+class RescoreResponse(BaseModel):
+    updated: int
+
+
 class MarkDigestedRequest(BaseModel):
     item_ids: list[int] = Field(min_length=1, max_length=200)
 
