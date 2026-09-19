@@ -64,3 +64,34 @@ def test_target_exception_is_caught_and_does_not_crash_server(caplog):
         time.sleep(0.2)  # let the background thread raise
     finally:
         server.shutdown()
+
+
+def test_digest_now_route_runs_its_own_target():
+    daily_called = threading.Event()
+    now_called = threading.Event()
+
+    port = _free_port()
+    server = trigger_server.start(port, daily_called.set, now_called.set)
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/trigger/digest-now", method="POST")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            assert resp.status == 202
+
+        assert now_called.wait(timeout=2)
+        assert not daily_called.is_set()
+    finally:
+        server.shutdown()
+
+
+def test_digest_now_route_is_404_when_no_target_configured():
+    port = _free_port()
+    server = trigger_server.start(port, lambda: None)  # no digest_now_run
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/trigger/digest-now", method="POST")
+        try:
+            urllib.request.urlopen(req, timeout=5)
+            raise AssertionError("expected HTTPError")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 404
+    finally:
+        server.shutdown()

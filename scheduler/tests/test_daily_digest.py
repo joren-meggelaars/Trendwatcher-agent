@@ -210,3 +210,74 @@ def test_send_digest_calls_graph_sendmail_when_configured(monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer fake-token"
     assert captured["json"]["message"]["toRecipients"][0]["emailAddress"]["address"] == "reader@example.com"
     assert captured["json"]["message"]["body"]["content"] == "<html>digest</html>"
+
+
+def test_source_name_uses_host_without_www_or_mailto_address():
+    assert daily_digest._source_name("https://www.krebsonsecurity.com/feed/") == "krebsonsecurity.com"
+    assert daily_digest._source_name("https://feeds.ncsc.nl/nieuws.rss") == "feeds.ncsc.nl"
+    assert daily_digest._source_name("mailto:news@tldrsec.com") == "news@tldrsec.com"
+
+
+def _patch_run_now(monkeypatch, items, top_n=5):
+    captured = {"params": None, "html": None}
+
+    class _Resp:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self):
+            return items
+
+    def _fake_get(url, params, timeout):
+        captured["url"] = url
+        captured["params"] = params
+        return _Resp()
+
+    monkeypatch.setattr(daily_digest.httpx, "get", _fake_get)
+    monkeypatch.setattr(daily_digest, "fetch_digest_settings", lambda: {"digest_top_n": top_n})
+    monkeypatch.setattr(daily_digest, "send_digest", lambda html_body: captured.__setitem__("html", html_body))
+    return captured
+
+
+def test_run_now_mails_top_items_without_scoring(monkeypatch):
+    items = [
+        {
+            "item_id": 7,
+            "title": "Kritieke bug",
+            "url": "https://example.com/bug",
+            "summary": "Samenvatting",
+            "relevance_score": 0.91,
+            "source_url": "https://www.example.com/feed",
+        }
+    ]
+    captured = _patch_run_now(monkeypatch, items, top_n=3)
+
+    daily_digest.run_now()
+
+    assert captured["url"].endswith("/items/top")
+    assert captured["params"] == {"days": config.MANUAL_DIGEST_LOOKBACK_DAYS, "limit": 3}
+    assert "Kritieke bug" in captured["html"]
+    assert "example.com</a>" in captured["html"]  # derived source name
+    assert "item_id=7&amp;label=interessant" in captured["html"]
+
+
+def test_run_now_sends_nothing_when_no_items(monkeypatch):
+    captured = _patch_run_now(monkeypatch, [])
+
+    daily_digest.run_now()
+
+    assert captured["html"] is None
+
+
+def test_run_now_sends_nothing_when_scoring_service_unreachable(monkeypatch):
+    def _failing_get(url, params, timeout):
+        raise httpx.ConnectError("down", request=httpx.Request("GET", url))
+
+    sent = []
+    monkeypatch.setattr(daily_digest.httpx, "get", _failing_get)
+    monkeypatch.setattr(daily_digest, "fetch_digest_settings", lambda: {"digest_top_n": 5})
+    monkeypatch.setattr(daily_digest, "send_digest", lambda html_body: sent.append(html_body))
+
+    daily_digest.run_now()
+
+    assert sent == []

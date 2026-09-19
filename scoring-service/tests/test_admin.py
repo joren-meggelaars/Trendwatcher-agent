@@ -179,8 +179,8 @@ def test_send_now_relays_to_scheduler_and_reports_success(admin_client, monkeypa
     resp = admin_client.post("/admin/settings/send-now")
 
     assert resp.status_code == 200
-    assert captured["url"] == "http://scheduler:8001/trigger/daily-digest"
-    assert "Digest-run gestart" in resp.text
+    assert captured["url"] == "http://scheduler:8001/trigger/digest-now"
+    assert "Digest wordt verstuurd" in resp.text
 
 
 def test_send_now_shows_error_when_scheduler_unreachable(admin_client, monkeypatch):

@@ -324,9 +324,12 @@ def send_digest_now(
     sent = None
     error = None
     try:
-        resp = httpx.post(f"{settings.scheduler_url}/trigger/daily-digest", timeout=10.0)
+        resp = httpx.post(f"{settings.scheduler_url}/trigger/digest-now", timeout=10.0)
         resp.raise_for_status()
-        sent = "Digest-run gestart — check over enkele ogenblikken je mailbox (of de scheduler-logs bij DIGEST_DRY_RUN)."
+        sent = (
+            "Digest wordt verstuurd met de beste recent gescoorde items — check binnen enkele "
+            "seconden je mailbox (of de scheduler-logs bij DIGEST_DRY_RUN)."
+        )
     except httpx.HTTPError as exc:
         error = f"Kon de scheduler niet bereiken op {settings.scheduler_url}: {exc}"
 

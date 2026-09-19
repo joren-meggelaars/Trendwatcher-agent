@@ -21,11 +21,16 @@ class _Handler(BaseHTTPRequestHandler):
         logger.info("%s - %s", self.address_string(), format % args)
 
     def do_POST(self) -> None:
-        if self.path == "/trigger/daily-digest":
-            self._run_in_background(self.server.daily_digest_run)  # type: ignore[attr-defined]
-            self._respond(202, b'{"status":"accepted"}')
+        routes = {
+            "/trigger/daily-digest": self.server.daily_digest_run,  # type: ignore[attr-defined]
+            "/trigger/digest-now": self.server.digest_now_run,  # type: ignore[attr-defined]
+        }
+        target = routes.get(self.path)
+        if target is None:
+            self._respond(404, b'{"error":"not found"}')
             return
-        self._respond(404, b'{"error":"not found"}')
+        self._run_in_background(target)
+        self._respond(202, b'{"status":"accepted"}')
 
     def _run_in_background(self, target) -> None:
         def _wrapped():
@@ -44,11 +49,17 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def start(port: int, daily_digest_run) -> ThreadingHTTPServer:
+def start(port: int, daily_digest_run, digest_now_run=None) -> ThreadingHTTPServer:
     """Starts the trigger server on a background thread and returns it
-    (caller keeps a reference so it isn't garbage-collected)."""
+    (caller keeps a reference so it isn't garbage-collected).
+
+    daily_digest_run: full run (fetch feeds, score new entries, mail).
+    digest_now_run: immediate mail of the best already-scored items, no
+    scoring — what the admin GUI's "verstuur nu" button uses.
+    """
     server = ThreadingHTTPServer(("0.0.0.0", port), _Handler)  # noqa: S104 - internal network only, see module docstring
     server.daily_digest_run = daily_digest_run  # type: ignore[attr-defined]
+    server.digest_now_run = digest_now_run  # type: ignore[attr-defined]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     logger.info("Trigger-server luistert intern op poort %d", port)

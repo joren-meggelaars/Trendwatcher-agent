@@ -66,7 +66,9 @@ def main() -> None:
 
     # Keep a reference so the server (and its background thread) isn't
     # garbage-collected once main() returns control to scheduler.start().
-    _trigger_server_handle = trigger_server.start(config.TRIGGER_SERVER_PORT, daily_digest.run)  # noqa: F841
+    _trigger_server_handle = trigger_server.start(  # noqa: F841
+        config.TRIGGER_SERVER_PORT, daily_digest.run, daily_digest.run_now
+    )
 
     logger.info(
         "Scheduler gestart: daily_digest dagelijks om %02d:00, weekly_discovery op %s om %02d:00, "

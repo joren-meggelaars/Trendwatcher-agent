@@ -38,6 +38,15 @@ class RecentFeedbackItem(BaseModel):
     summary: str | None
 
 
+class TopItem(BaseModel):
+    item_id: int
+    title: str
+    url: str
+    summary: str
+    relevance_score: float
+    source_url: str
+
+
 class SourceCreate(BaseModel):
     url: str
     type: str

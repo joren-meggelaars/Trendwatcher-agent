@@ -9,6 +9,7 @@ import html
 import logging
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import feedparser
 import httpx
@@ -203,6 +204,50 @@ def run() -> None:
         digest_top_n = fetch_digest_settings()["digest_top_n"]
         top_items = sorted(scored_items, key=lambda i: i["relevance_score"], reverse=True)[:digest_top_n]
         send_digest(build_digest_html(top_items))
+
+
+def _source_name(source_url: str) -> str:
+    """Readable label for a source when only its URL is known (no feed title
+    is stored in the database): host without "www.", or the sender address
+    for mailbox sources ("mailto:sender@example.com")."""
+    if source_url.lower().startswith("mailto:"):
+        return source_url[len("mailto:"):]
+    host = urlparse(source_url).netloc.lower()
+    if host.startswith("www."):
+        host = host[len("www."):]
+    return host or source_url
+
+
+def run_now() -> None:
+    """Immediate digest: mails the best already-scored items from the last
+    MANUAL_DIGEST_LOOKBACK_DAYS days without fetching feeds or scoring
+    anything, so it doesn't wait on the (rate-limited) scoring step. Used by
+    the admin GUI's "verstuur nu" button; the scheduled run() is unchanged."""
+    digest_top_n = fetch_digest_settings()["digest_top_n"]
+    try:
+        resp = httpx.get(
+            f"{config.SCORING_SERVICE_URL}/items/top",
+            params={"days": config.MANUAL_DIGEST_LOOKBACK_DAYS, "limit": digest_top_n},
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError:
+        logger.exception("Kon /items/top niet ophalen — geen digest verstuurd.")
+        return
+
+    items = resp.json()
+    if not items:
+        logger.info(
+            "Geen gescoorde items in de laatste %d dagen — geen digest verstuurd.",
+            config.MANUAL_DIGEST_LOOKBACK_DAYS,
+        )
+        return
+
+    for item in items:
+        item["source_name"] = _source_name(item["source_url"])
+
+    logger.info("Handmatige digest: %d item(s) uit de laatste %d dagen.", len(items), config.MANUAL_DIGEST_LOOKBACK_DAYS)
+    send_digest(build_digest_html(items))
 
 
 if __name__ == "__main__":

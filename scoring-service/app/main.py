@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -112,6 +112,36 @@ def recent_feedback_items(
         .order_by(models.Item.id.desc())
         .all()
     )
+
+
+@app.get("/items/top", response_model=list[schemas.TopItem])
+def top_items(
+    days: int = Query(7, ge=1, le=365),
+    limit: int = Query(5, ge=1, le=50),
+    db: Session = Depends(get_db),
+) -> list[schemas.TopItem]:
+    """Best already-scored items from the last `days` days, highest score first
+    (newest first on ties). Used by the scheduler's "verstuur nu" digest so it
+    can mail immediately instead of re-scoring every feed entry."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    items = (
+        db.query(models.Item)
+        .filter(models.Item.relevance_score.is_not(None), models.Item.created_at >= cutoff)
+        .order_by(models.Item.relevance_score.desc(), models.Item.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        schemas.TopItem(
+            item_id=item.id,
+            title=item.title,
+            url=item.url,
+            summary=item.summary or "",
+            relevance_score=item.relevance_score,
+            source_url=item.source_ref.url if item.source_ref else item.source,
+        )
+        for item in items
+    ]
 
 
 @app.post("/sources", response_model=schemas.SourceResponse, status_code=201)

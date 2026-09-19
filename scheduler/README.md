@@ -66,9 +66,14 @@ admin-GUI van de scoring-service (`/admin/settings`) kan ze via
   (`sync_digest_schedule`, elke `SETTINGS_SYNC_INTERVAL_SECONDS`, standaard 5
   minuten) checkt op wijzigingen en herplant de job — geen herstart nodig.
 - De "verstuur nu"-knop in de admin-GUI doet een `POST` naar
-  `trigger_server.py`'s interne `/trigger/daily-digest`-endpoint (alleen
+  `trigger_server.py`'s interne `/trigger/digest-now`-endpoint (alleen
   bereikbaar binnen het Docker-netwerk, nooit naar de host/internet
-  gepubliceerd), die de digest-job direct op de achtergrond start.
+  gepubliceerd). Die draait `daily_digest.run_now()`: mailt de beste al
+  gescoorde items van de laatste `MANUAL_DIGEST_LOOKBACK_DAYS` dagen (via
+  `GET /items/top` op de scoring-service), **zonder feeds op te halen of te
+  scoren** — dus geen wachttijd door Voyage's rate limit. Het geplande
+  `/trigger/daily-digest` (volledige run: ophalen, scoren, mailen) blijft
+  bestaan, maar staat niet achter een knop.
 
 Als de scoring-service niet bereikbaar is, valt elke job terug op de
 statische `DIGEST_HOUR`/`DIGEST_TOP_N`-waarden uit `.env`.
