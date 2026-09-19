@@ -15,6 +15,13 @@ load_dotenv()
 
 SCORING_SERVICE_URL = os.environ.get("SCORING_SERVICE_URL", "http://127.0.0.1:8000").rstrip("/")
 
+# Base URL used for the 👍/👎 links *inside the digest email*. Must be
+# reachable from the reader's browser, so it can't be the internal Docker
+# hostname SCORING_SERVICE_URL points at (http://scoring-service:8000 only
+# resolves inside the compose network). Empty -> fall back to
+# SCORING_SERVICE_URL, which is fine when running everything locally.
+FEEDBACK_BASE_URL = (os.environ.get("FEEDBACK_BASE_URL", "").strip() or SCORING_SERVICE_URL).rstrip("/")
+
 # Microsoft Graph (client-credentials / app-only flow) — mail goes through
 # Graph's sendMail, not SMTP/IMAP. The app registration needs application
 # permission Mail.Send (with admin consent) on GRAPH_TENANT_ID.

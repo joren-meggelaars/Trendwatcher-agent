@@ -115,10 +115,10 @@ def build_digest_html(top_items: list[dict]) -> str:
     rows = []
     for item in top_items:
         interessant_url = (
-            f"{config.SCORING_SERVICE_URL}/feedback-link?item_id={item['item_id']}&label=interessant"
+            f"{config.FEEDBACK_BASE_URL}/feedback-link?item_id={item['item_id']}&label=interessant"
         )
         niet_url = (
-            f"{config.SCORING_SERVICE_URL}/feedback-link?item_id={item['item_id']}&label=niet_interessant"
+            f"{config.FEEDBACK_BASE_URL}/feedback-link?item_id={item['item_id']}&label=niet_interessant"
         )
         rows.append(
             "<tr>"

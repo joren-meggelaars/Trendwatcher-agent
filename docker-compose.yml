@@ -75,6 +75,9 @@ services:
     restart: unless-stopped
     environment:
       SCORING_SERVICE_URL: http://scoring-service:8000
+      # Base URL for the 👍/👎 links in the digest email. Must be reachable
+      # from the reader's browser (not the internal hostname above).
+      FEEDBACK_BASE_URL: ${FEEDBACK_BASE_URL:-http://${BIND_ADDRESS}:8000}
       GRAPH_TENANT_ID: ${GRAPH_TENANT_ID}
       GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID}
       GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET}

@@ -127,6 +127,16 @@ def test_build_digest_html_uses_thumbs_for_feedback_links():
     assert "item_id=1&amp;label=niet_interessant" in html_out
 
 
+def test_build_digest_html_feedback_links_use_public_base_url_not_internal_one(monkeypatch):
+    monkeypatch.setattr(config, "SCORING_SERVICE_URL", "http://scoring-service:8000")
+    monkeypatch.setattr(config, "FEEDBACK_BASE_URL", "http://10.0.100.8:8000")
+
+    html_out = daily_digest.build_digest_html([_DIGEST_ITEM])
+
+    assert "http://10.0.100.8:8000/feedback-link?item_id=1&amp;label=interessant" in html_out
+    assert "scoring-service" not in html_out
+
+
 def test_build_digest_html_escapes_untrusted_feed_content():
     malicious_item = {
         **_DIGEST_ITEM,
