@@ -17,20 +17,30 @@ cp .env.example .env
 
 ## Jobs
 
-- **`jobs/daily_digest.py`** — haalt actieve bronnen op
-  (`GET /sources?status=actief`), parst hun RSS-feed met `feedparser`, scoort
-  nieuwe items via `POST /score` (met `source_id`), en verdeelt ze over twee
-  categorieën (de scoring-service geeft elk item een `category`
-  `"markt"`/`"nieuws"` terug, zie `app/classification.py`). Per categorie
-  wordt de top-N op `relevance_score` gekozen, en de HTML-digest heeft twee
-  secties: **Marktontwikkeling** (funding, overnames, marktcijfers) en
-  **Nieuws**. Elke categorie wordt door de scoring-service apart gescoord op
-  jouw 👍/👎 binnen díe categorie. Per item staan twee
-  feedback-links (`GET /feedback-link?item_id=...&label=...`) via de
-  Microsoft Graph `sendMail`-API (`POST /users/{DIGEST_MAILBOX}/sendMail`,
-  zie `graph_client.py`). Met `DIGEST_DRY_RUN=true` (standaard) wordt de
-  digest-HTML naar de console gelogd in plaats van verstuurd — zo te testen
-  voordat de Graph-app-registratie klaarstaat.
+- **`jobs/ingest.py`** — draait **doorlopend op de achtergrond** (elke
+  `INGEST_INTERVAL_MINUTES`, standaard 30; de eerste run één interval na de
+  start). Haalt actieve bronnen op (`GET /sources?status=actief`), parst hun
+  RSS-feed met `feedparser` en scoort nieuwe items via `POST /score` (met
+  `source_id`). Het scoren is het trage, rate-gelimiteerde deel; door het de
+  hele dag te laten lopen wacht de digest er niet meer op. De "al gezien"-cache
+  wordt na elke bron opgeslagen, dus een onderbroken run raakt zijn voortgang
+  niet kwijt. Een run die langer duurt dan het interval laat de volgende tick
+  vervallen (`max_instances=1`).
+- **`jobs/daily_digest.py`** — scoort of haalt **niets** zelf op, maar mailt wat
+  `ingest` al gescoord heeft: per categorie (de scoring-service geeft elk item
+  een `category` `"markt"`/`"nieuws"` terug, zie `app/classification.py`) de
+  top-N beste items van de laatste `DIGEST_LOOKBACK_DAYS` dagen die nog niet
+  gemaild zijn (`GET /items/top?undigested=true`). De HTML-digest heeft twee
+  secties: **Marktontwikkeling** en **Nieuws**, elk apart gescoord op jouw
+  👍/👎 binnen díe categorie. Per item staan twee feedback-links
+  (`GET /feedback-link?item_id=...&label=...`). Verzonden via de Microsoft
+  Graph `sendMail`-API (`POST /users/{DIGEST_MAILBOX}/sendMail`, zie
+  `graph_client.py`); daarna worden precies die items als gemaild gemarkeerd
+  (`POST /items/mark-digested`), zodat de volgende digest verder kijkt. Bij een
+  mislukte verzending worden ze niet gemarkeerd en komen ze de volgende keer
+  opnieuw aan bod. Met `DIGEST_DRY_RUN=true` (standaard) wordt de digest-HTML
+  naar de console gelogd in plaats van verstuurd (en dus ook niets gemarkeerd) —
+  zo te testen voordat de Graph-app-registratie klaarstaat.
 - **`jobs/weekly_discovery.py`** — haalt recente `"interessant"`-items op
   (`GET /items/recent-feedback?label=interessant&days=...`), distilleert
   daaruit een paar zoektermen (woordfrequentie op titels, geen NLP nodig),
@@ -50,9 +60,10 @@ cp .env.example .env
   vereist naast `Mail.Send` ook applicatiepermissie `Mail.Read` (admin
   consent) op de Graph-appregistratie.
 
-Alle drie de jobs zijn los aan te roepen, zonder de scheduler-loop:
+Alle jobs zijn los aan te roepen, zonder de scheduler-loop:
 
 ```bash
+uv run python -m jobs.ingest
 uv run python -m jobs.daily_digest
 uv run python -m jobs.weekly_discovery
 uv run python -m jobs.mailbox_ingest
@@ -65,7 +76,7 @@ admin-GUI van de scoring-service (`/admin/settings`) kan ze via
 `GET`/`PUT /settings/digest` aanpassen, opgeslagen in de Postgres-database:
 
 - `digest_top_n` (per categorie: dus N marktontwikkeling én N nieuws) wordt
-  bij elke `daily_digest`-run vers opgehaald
+  bij elke digest-run vers opgehaald
   (`remote_settings.fetch_digest_settings()`), dus een wijziging geldt vanaf
   de eerstvolgende run.
 - `digest_hour` bepaalt de APScheduler-cron-trigger; een achtergrondtaak
@@ -77,10 +88,10 @@ admin-GUI van de scoring-service (`/admin/settings`) kan ze via
   gepubliceerd). Die draait `daily_digest.run_now()`: mailt de beste al
   gescoorde items van de laatste `MANUAL_DIGEST_LOOKBACK_DAYS` dagen, per
   categorie de top-N (via `GET /items/top?category=markt` en `...=nieuws` op
-  de scoring-service), **zonder feeds op te halen of te
-  scoren** — dus geen wachttijd door Voyage's rate limit. Het geplande
-  `/trigger/daily-digest` (volledige run: ophalen, scoren, mailen) blijft
-  bestaan, maar staat niet achter een knop.
+  de scoring-service). Het is een **voorbeeld**: het slaat eerder gemailde items
+  niet over en markeert niets, dus het neemt nooit items weg van de geplande
+  digest. `/trigger/daily-digest` draait de geplande digest zelf (mailen én
+  markeren).
 
 Als de scoring-service niet bereikbaar is, valt elke job terug op de
 statische `DIGEST_HOUR`/`DIGEST_TOP_N`-waarden uit `.env`.
@@ -91,9 +102,15 @@ statische `DIGEST_HOUR`/`DIGEST_TOP_N`-waarden uit `.env`.
 uv run python main.py
 ```
 
-Start een `APScheduler`-`BlockingScheduler` met twee cron-triggers:
-`daily_digest` dagelijks op `DIGEST_HOUR`, `weekly_discovery` wekelijks op
-`DISCOVERY_DAY`/`DISCOVERY_HOUR` (zie `.env.example`).
+Start een `APScheduler`-`BlockingScheduler` met: `ingest` als interval-job
+(elke `INGEST_INTERVAL_MINUTES`), `daily_digest` dagelijks op `DIGEST_HOUR`,
+`weekly_discovery` wekelijks op `DISCOVERY_DAY`/`DISCOVERY_HOUR` en
+`mailbox_ingest` dagelijks (zie `.env.example`).
+
+Alles wat scoort (`ingest`, `mailbox_ingest`, `weekly_discovery`) loopt via één
+gedeelde begrenzer (`rate_limit.py`): `SCORE_REQUEST_DELAY_SECONDS` is de
+minimale afstand tussen scoring-aanroepen over alle jobs samen (21 voor
+Voyage's gratis tier van 3 req/min, 0 met een betaalmethode).
 
 ## Microsoft Graph: verzenden (en later lezen) van mail
 
@@ -121,16 +138,16 @@ open (zie project-changelog/rapportage).
 
 ## Seen-items cache
 
-`daily_digest.py` houdt per bron bij welke RSS-entry-URL's al gescoord zijn,
+`ingest.py` houdt per bron bij welke RSS-entry-URL's al gescoord zijn,
 in een lokaal JSON-bestand (`SEEN_ITEMS_PATH`, standaard
 `data/seen_items.json`). Dit voorkomt dat dezelfde feed-items elke dag
 opnieuw gescoord worden. Geen externe state nodig voor Fase 1.
 
 Per bron worden per run maximaal `MAX_NEW_ENTRIES_PER_SOURCE` (standaard 10,
 0 = onbeperkt) van de **nieuwste** ongeziene items gescoord. Een nieuwe bron met
-een grote feed (NCSC: honderden items, IETF: ~600) zou anders de hele run — en
-dus de digest — uren blokkeren; de oudere ongeziene items worden als gezien
-gemarkeerd in plaats van gescoord.
+een grote feed (NCSC: honderden items, IETF: ~600) zou anders uren aan scoring
+opeisen; de oudere ongeziene items worden als gezien gemarkeerd in plaats van
+gescoord.
 
 ## Tests
 

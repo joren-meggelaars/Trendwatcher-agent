@@ -14,6 +14,7 @@ from app.classification import classify, market_strength
         "Zwitserse beveiliger neemt Nederlandse MSP over",
         "Marktaandeel van cloudbeveiliging groeit sterk",
         "Overheid investeert 50 miljoen in cyberweerbaarheid",
+        "Cybersecurity M&A Roundup: 33 Deals Announced in August 2026",
     ],
 )
 def test_market_developments_are_classified_as_markt(title):

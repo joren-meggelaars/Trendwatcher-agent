@@ -128,20 +128,26 @@ def top_items(
     category: schemas.ItemCategory | None = Query(
         None, description="Only items of this category; omit for all."
     ),
+    undigested: bool = Query(
+        False, description="Only items that have not been mailed in a scheduled digest yet."
+    ),
     db: Session = Depends(get_db),
 ) -> list[schemas.TopItem]:
     """Best already-scored items from the last `days` days, highest score first
-    (newest first on ties). Used by the scheduler's "verstuur nu" digest so it
-    can mail immediately instead of re-scoring every feed entry.
+    (newest first on ties). Used by the scheduler's digests, which mail what the
+    continuously running ingest job has already scored instead of scoring
+    feed entries themselves.
 
     With `category` the split is applied here (see app/classification.py),
-    before `limit`, so the top N is filled with items of that category only."""
+    before `limit`, so the top N is filled with items of that category only.
+    With `undigested` items already mailed (see POST /items/mark-digested) are left out."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    query = (
-        db.query(models.Item)
-        .filter(models.Item.relevance_score.is_not(None), models.Item.created_at >= cutoff)
-        .order_by(models.Item.relevance_score.desc(), models.Item.id.desc())
+    query = db.query(models.Item).filter(
+        models.Item.relevance_score.is_not(None), models.Item.created_at >= cutoff
     )
+    if undigested:
+        query = query.filter(models.Item.digested_at.is_(None))
+    query = query.order_by(models.Item.relevance_score.desc(), models.Item.id.desc())
     if category is None:
         items = query.limit(limit).all()
     else:
@@ -174,6 +180,23 @@ def top_items(
         )
         for item in items
     ]
+
+
+@app.post("/items/mark-digested", response_model=schemas.MarkDigestedResponse)
+def mark_digested(
+    payload: schemas.MarkDigestedRequest,
+    db: Session = Depends(get_db),
+) -> schemas.MarkDigestedResponse:
+    """Record that these items were mailed in the daily digest. Idempotent: an
+    item that is already marked keeps its first timestamp, unknown ids are
+    ignored; `marked` is how many items were newly marked."""
+    marked = (
+        db.query(models.Item)
+        .filter(models.Item.id.in_(payload.item_ids), models.Item.digested_at.is_(None))
+        .update({"digested_at": datetime.now(timezone.utc)}, synchronize_session=False)
+    )
+    db.commit()
+    return schemas.MarkDigestedResponse(marked=marked)
 
 
 @app.post("/sources", response_model=schemas.SourceResponse, status_code=201)

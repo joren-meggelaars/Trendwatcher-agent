@@ -40,18 +40,26 @@ DIGEST_DRY_RUN = os.environ.get("DIGEST_DRY_RUN", "true").strip().lower() not in
 DIGEST_HOUR = int(os.environ.get("DIGEST_HOUR", "7"))
 DIGEST_TOP_N = int(os.environ.get("DIGEST_TOP_N", "5"))
 
-# Optional pause between successive POST /score calls in daily_digest, in
-# seconds. Default 0 (no delay) — added as a safety valve for burst-related
-# issues (e.g. Voyage's free-tier rate limit of 3 req/min when
-# EMBEDDING_PROVIDER=voyage on the scoring-service), not because it's needed
-# for every setup.
+# Minimum spacing between POST /score calls, in seconds, shared by all jobs
+# that score (see rate_limit.py). Default 0 (no delay); 21 for Voyage's
+# free-tier limit of 3 req/min when EMBEDDING_PROVIDER=voyage on the
+# scoring-service — not needed once a payment method is on file.
 SCORE_REQUEST_DELAY_SECONDS = float(os.environ.get("SCORE_REQUEST_DELAY_SECONDS", "0"))
 
-# Per source and per daily_digest run, score at most this many of the newest
-# unseen feed entries (0 = no limit). Protects against a newly added source
-# with a big feed (NCSC: hundreds, IETF: ~600 entries) blocking the run — and
-# thus the digest — for hours; older unseen entries are marked seen, not scored.
+# jobs/ingest.py (fetch feeds + score) runs continuously in the background at
+# this interval; the daily digest only mails what is already scored. The first
+# ingest runs one interval after the scheduler starts, not at startup.
+INGEST_INTERVAL_MINUTES = int(os.environ.get("INGEST_INTERVAL_MINUTES", "30"))
+
+# Per source and per ingest run, score at most this many of the newest unseen
+# feed entries (0 = no limit). Protects against a newly added source with a big
+# feed (NCSC: hundreds, IETF: ~600 entries) hogging the scoring for hours;
+# older unseen entries are marked seen, not scored.
 MAX_NEW_ENTRIES_PER_SOURCE = int(os.environ.get("MAX_NEW_ENTRIES_PER_SOURCE", "10"))
+
+# The scheduled digest picks the best not-yet-mailed items scored within this
+# many days (a few days, so a failed digest run does not lose its items).
+DIGEST_LOOKBACK_DAYS = int(os.environ.get("DIGEST_LOOKBACK_DAYS", "3"))
 
 # APScheduler day-of-week name, e.g. "mon", "tue", ... "sun".
 DISCOVERY_DAY = os.environ.get("DISCOVERY_DAY", "mon")

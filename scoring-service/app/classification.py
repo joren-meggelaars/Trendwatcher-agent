@@ -47,6 +47,7 @@ _MARKET_PATTERNS = [
         r"\btakeover\b",
         r"\bbuyout\b",
         r"\bdivest(?:s|iture)?\b",
+        r"\bm&a\b",
         # Marktonderzoek / analisten
         r"\bmarket (?:share|size|growth|forecast|report|leader|opportunity|trends?|outlook)\b",
         r"\bcagr\b",

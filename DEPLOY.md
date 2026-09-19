@@ -90,11 +90,16 @@ is aangeraakt. Ook op een bestaande database (bijv. de VM, waar de tabel
 de scoring-service bij het opstarten — veilig: ontbrekende nullable kolommen
 worden automatisch toegevoegd (`app/migrations.py`, SQLite en PostgreSQL).
 
-**Let op na het seeden van nieuwe actieve bronnen:** de eerste run scoort per
-bron maximaal `MAX_NEW_ENTRIES_PER_SOURCE` (standaard 10) van de nieuwste
-items, en markeert de oudere achterstand als gezien. Bij de Voyage-gratis-tier
-(`SCORE_REQUEST_DELAY_SECONDS=21`) is dat voor ~25 nieuwe bronnen nog altijd
-ruim een uur; de digest wordt pas na die run verstuurd.
+**Na het seeden van nieuwe actieve bronnen:** de scheduler haalt en scoort ze
+op de achtergrond (`ingest`, elke `INGEST_INTERVAL_MINUTES`, standaard 30; de
+eerste run één interval na de start van de scheduler). Per bron worden
+maximaal `MAX_NEW_ENTRIES_PER_SOURCE` (standaard 10) van de nieuwste items
+gescoord en de oudere achterstand wordt als gezien gemarkeerd. De digest om
+`DIGEST_HOUR` scoort niets meer en mailt wat er dan al gescoord is, dus hij
+wacht nooit op de scoring. Bij de Voyage-gratis-tier
+(`SCORE_REQUEST_DELAY_SECONDS=21`) duurt het scoren van ~25 nieuwe bronnen
+ruim een uur op de achtergrond; met een betaalmethode
+(`SCORE_REQUEST_DELAY_SECONDS=0`) is het in minuten klaar.
 
 ## 6. Controleren dat alles draait
 
@@ -181,7 +186,7 @@ volume óók.
 
 De allereerste keer dat je dit volume introduceert is het leeg. De scoring-
 service herkent al opgeslagen URL's en maakt dan geen duplicaat, maar de
-scheduler wacht per item nog wel `SCORE_REQUEST_DELAY_SECONDS`. Wil je dat
+scheduler wacht per scoring-aanroep nog wel `SCORE_REQUEST_DELAY_SECONDS`. Wil je dat
 overslaan, kopieer dan vóór de update de oude cache uit de draaiende
 container en zet hem er daarna in terug:
 

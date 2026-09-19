@@ -80,6 +80,10 @@ class Item(Base):
     embedding: Mapped[list[float] | None] = mapped_column(EmbeddingVector, nullable=True)
     relevance_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    # Set when the item was mailed in the scheduled daily digest, so the next
+    # digest picks the best items that have not been mailed yet. Nullable and
+    # added after the table existed: see app/migrations.py.
+    digested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     feedback: Mapped[list["Feedback"]] = relationship(back_populates="item")
     source_ref: Mapped["Source | None"] = relationship(back_populates="items")

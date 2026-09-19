@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 import httpx
 
 import config
+import rate_limit
 from search_provider import SearchResult, get_search_provider
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,7 @@ def score_search_result(client: httpx.Client, result: SearchResult, source: dict
         "raw_content": raw_content,
         "source_id": source["id"],
     }
+    rate_limit.wait_for_scoring_slot()
     resp = client.post(f"{config.SCORING_SERVICE_URL}/score", json=payload)
     resp.raise_for_status()
     return resp.json()

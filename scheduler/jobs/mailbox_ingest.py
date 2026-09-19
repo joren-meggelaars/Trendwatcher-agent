@@ -23,11 +23,11 @@ Runs standalone for testing:
 import html
 import logging
 import re
-import time
 
 import httpx
 
 import config
+import rate_limit
 from graph_client import get_graph_token
 
 logger = logging.getLogger(__name__)
@@ -88,6 +88,7 @@ def score_message(client: httpx.Client, message: dict, sender_email: str, source
         "raw_content": raw_content,
         "source_id": source["id"],
     }
+    rate_limit.wait_for_scoring_slot()
     resp = client.post(f"{config.SCORING_SERVICE_URL}/score", json=payload)
     resp.raise_for_status()
     return resp.json()
@@ -128,9 +129,6 @@ def run() -> None:
                     message.get("id"), sender_email,
                 )
                 continue
-
-            if config.SCORE_REQUEST_DELAY_SECONDS:
-                time.sleep(config.SCORE_REQUEST_DELAY_SECONDS)
 
             try:
                 mark_as_read(token, message["id"])

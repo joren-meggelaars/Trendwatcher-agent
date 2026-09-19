@@ -54,6 +54,14 @@ class RecentFeedbackItem(BaseModel):
     summary: str | None
 
 
+class MarkDigestedRequest(BaseModel):
+    item_ids: list[int] = Field(min_length=1, max_length=200)
+
+
+class MarkDigestedResponse(BaseModel):
+    marked: int
+
+
 class TopItem(BaseModel):
     item_id: int
     title: str

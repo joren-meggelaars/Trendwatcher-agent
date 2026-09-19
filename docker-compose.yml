@@ -90,11 +90,13 @@ services:
       DIGEST_DRY_RUN: ${DIGEST_DRY_RUN:-true}
       DIGEST_HOUR: ${DIGEST_HOUR:-7}
       DIGEST_TOP_N: ${DIGEST_TOP_N:-5}
-      # Tuned against Voyage's free-tier rate limit (3 req/min) — do not drop
-      # this back to the config.py default of 0 without checking that limit
-      # no longer applies (e.g. a paid Voyage plan).
+      # Minimum spacing between scoring calls across all jobs. 21 keeps
+      # Voyage's free tier (3 req/min) happy; with a payment method on file
+      # that limit is gone and 0 is fine.
       SCORE_REQUEST_DELAY_SECONDS: ${SCORE_REQUEST_DELAY_SECONDS:-0}
+      INGEST_INTERVAL_MINUTES: ${INGEST_INTERVAL_MINUTES:-30}
       MAX_NEW_ENTRIES_PER_SOURCE: ${MAX_NEW_ENTRIES_PER_SOURCE:-10}
+      DIGEST_LOOKBACK_DAYS: ${DIGEST_LOOKBACK_DAYS:-3}
       DISCOVERY_DAY: ${DISCOVERY_DAY:-mon}
       DISCOVERY_HOUR: ${DISCOVERY_HOUR:-8}
       DISCOVERY_LOOKBACK_DAYS: ${DISCOVERY_LOOKBACK_DAYS:-30}

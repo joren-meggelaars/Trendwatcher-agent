@@ -1,4 +1,10 @@
-"""Daily job: fetch active sources' RSS feeds, score new entries, email a digest.
+"""Daily job: mail the best already-scored items, as one digest with a section
+for market development and one for news.
+
+This job does not fetch feeds or score anything: scoring happens continuously
+in jobs/ingest.py, so the digest goes out on time however slow (rate-limited)
+the scoring is. Each digest takes the best items that were not mailed before
+and marks them as mailed, so the next digest moves on to new ones.
 
 Runs standalone for testing:
 
@@ -7,17 +13,13 @@ Runs standalone for testing:
 
 import html
 import logging
-import time
-from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-import feedparser
 import httpx
 
 import config
 from graph_client import get_graph_token
 from remote_settings import fetch_digest_settings
-from seen_items import SeenItemsCache
 
 DIGEST_SUBJECT = "Security Trendwatch — dagelijkse digest"
 
@@ -30,107 +32,7 @@ DIGEST_SECTIONS = (
     ("nieuws", "Nieuws"),
 )
 
-# score_entry retries a failed POST /score up to twice, waiting these many
-# seconds before each retry, before giving up on the item.
-_SCORE_RETRY_DELAYS = (1, 3)
-
 logger = logging.getLogger(__name__)
-
-
-def fetch_active_sources(client: httpx.Client) -> list[dict]:
-    resp = client.get(f"{config.SCORING_SERVICE_URL}/sources", params={"status": "actief"})
-    resp.raise_for_status()
-    return resp.json()
-
-
-def fetch_new_entries(source: dict, seen: SeenItemsCache) -> list[dict]:
-    """Unseen entries of one feed, at most MAX_NEW_ENTRIES_PER_SOURCE of them.
-
-    A source that is new to the seen-cache would otherwise have its whole feed
-    (hundreds of entries for some) scored in one run — hours at the Voyage
-    free-tier rate — and the digest is only sent after that. So only the
-    newest N are kept; the older unseen ones are marked as seen without being
-    scored, so that backlog is not re-attempted every day. 0 = no limit.
-    """
-    parsed = feedparser.parse(source["url"])
-    source_name = parsed.feed.get("title") or source["url"]
-    new_entries = []  # (published, entry)
-    for entry in parsed.entries:
-        link = entry.get("link", "")
-        if not link or seen.has_seen(source["id"], link):
-            continue
-        published = entry.get("published_parsed") or entry.get("updated_parsed")
-        new_entries.append(
-            (
-                tuple(published) if published else (),
-                {
-                    "title": entry.get("title") or "(geen titel)",
-                    "link": link,
-                    "raw_content": entry.get("summary") or entry.get("title") or "",
-                    "source_name": source_name,
-                },
-            )
-        )
-
-    limit = config.MAX_NEW_ENTRIES_PER_SOURCE
-    if limit and len(new_entries) > limit:
-        # Newest first; entries without a date keep their feed order, after the dated ones.
-        new_entries.sort(key=lambda pair: pair[0], reverse=True)
-        for _published, skipped in new_entries[limit:]:
-            seen.mark_seen(source["id"], skipped["link"])
-        logger.info(
-            "%s: %d ongeziene items, alleen de nieuwste %d worden gescoord (MAX_NEW_ENTRIES_PER_SOURCE); "
-            "de %d oudere zijn als gezien gemarkeerd.",
-            source["url"], len(new_entries), limit, len(new_entries) - limit,
-        )
-        new_entries = new_entries[:limit]
-    return [entry for _published, entry in new_entries]
-
-
-def score_entry(client: httpx.Client, entry: dict, source: dict) -> dict:
-    """POST /score for one RSS entry, retrying transient failures.
-
-    Retries up to len(_SCORE_RETRY_DELAYS) times (with backoff) on a
-    connection-level error or a 5xx response — the kind of failure that can
-    come from a hiccup in the connection rather than a genuine problem with
-    this item. A 4xx response (e.g. an unknown source_id) is not retried,
-    since retrying won't change the outcome.
-    """
-    payload = {
-        "source": source["url"],
-        "title": entry["title"],
-        "url": entry["link"],
-        "raw_content": entry["raw_content"],
-        "source_id": source["id"],
-    }
-
-    attempts = len(_SCORE_RETRY_DELAYS) + 1
-    for attempt in range(1, attempts + 1):
-        try:
-            resp = client.post(f"{config.SCORING_SERVICE_URL}/score", json=payload)
-            resp.raise_for_status()
-            result = resp.json()
-            result["title"] = entry["title"]
-            result["url"] = entry["link"]
-            result["source_name"] = entry["source_name"]
-            result["source_url"] = source["url"]
-            return result
-        except httpx.HTTPError as exc:
-            is_last_attempt = attempt == attempts
-            is_client_error = (
-                isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500
-            )
-            logger.warning(
-                "POST /score mislukt (poging %d/%d, %s) voor %s "
-                "(len(raw_content)=%d, tijdstip=%s)",
-                attempt, attempts, exc, entry["link"],
-                len(entry["raw_content"]), datetime.now(timezone.utc).isoformat(),
-            )
-            if is_client_error or is_last_attempt:
-                raise
-            time.sleep(_SCORE_RETRY_DELAYS[attempt - 1])
-
-    raise AssertionError("unreachable")  # loop always returns or raises
 
 
 def _safe_link(url: str, label: str) -> str:
@@ -185,7 +87,9 @@ def build_digest_html(items_by_category: dict[str, list[dict]]) -> str:
     return f"<html><body><h1>{DIGEST_SUBJECT}</h1>{sections}</body></html>"
 
 
-def send_digest(html_body: str) -> None:
+def send_digest(html_body: str) -> bool:
+    """Mail the digest via Graph. Returns True when it was really sent, False
+    for a dry run / missing mail configuration, where it is only logged."""
     if config.DIGEST_DRY_RUN or not config.DIGEST_MAILBOX or not config.DIGEST_TO_EMAIL:
         logger.info(
             "digest_dry_run staat aan (of DIGEST_MAILBOX/DIGEST_TO_EMAIL ontbreekt) — "
@@ -193,7 +97,7 @@ def send_digest(html_body: str) -> None:
             "Onderwerp: %s\nAan: %s\n%s",
             DIGEST_SUBJECT, config.DIGEST_TO_EMAIL, html_body,
         )
-        return
+        return False
 
     token = get_graph_token()
     payload = {
@@ -212,50 +116,7 @@ def send_digest(html_body: str) -> None:
     )
     resp.raise_for_status()
     logger.info("Digest verzonden via Graph naar %s", config.DIGEST_TO_EMAIL)
-
-
-def run() -> None:
-    seen = SeenItemsCache.load()
-
-    with httpx.Client(timeout=30.0) as client:
-        sources = fetch_active_sources(client)
-        if not sources:
-            logger.info("Geen actieve bronnen gevonden — geen digest te versturen.")
-            return
-
-        scored_items = []
-        for source in sources:
-            for entry in fetch_new_entries(source, seen):
-                try:
-                    scored_items.append(score_entry(client, entry, source))
-                except httpx.HTTPError:
-                    logger.exception(
-                        "Kon item definitief niet scoren (na retries): %s "
-                        "(len(raw_content)=%d, tijdstip=%s)",
-                        entry["link"], len(entry["raw_content"]), datetime.now(timezone.utc).isoformat(),
-                    )
-                    continue
-                finally:
-                    if config.SCORE_REQUEST_DELAY_SECONDS:
-                        time.sleep(config.SCORE_REQUEST_DELAY_SECONDS)
-                seen.mark_seen(source["id"], entry["link"])
-
-        seen.save()
-
-        if not scored_items:
-            logger.info("Geen nieuwe items gevonden in de actieve bronnen.")
-            return
-
-        digest_top_n = fetch_digest_settings()["digest_top_n"]
-        top_by_category = {}
-        for category, _heading in DIGEST_SECTIONS:
-            in_category = [i for i in scored_items if i.get("category") == category]
-            top_by_category[category] = sorted(
-                in_category, key=lambda i: i["relevance_score"], reverse=True
-            )[:digest_top_n]
-            logger.info("%d van %d nieuwe items in categorie %s.", len(in_category), len(scored_items), category)
-
-        send_digest(build_digest_html(top_by_category))
+    return True
 
 
 def _source_name(source_url: str) -> str:
@@ -270,37 +131,74 @@ def _source_name(source_url: str) -> str:
     return host or source_url
 
 
-def run_now() -> None:
-    """Immediate digest: mails the best already-scored items from the last
-    MANUAL_DIGEST_LOOKBACK_DAYS days without fetching feeds or scoring
-    anything, so it doesn't wait on the (rate-limited) scoring step. Used by
-    the admin GUI's "verstuur nu" button; the scheduled run() is unchanged.
-    Same layout as the daily digest: top-N per category."""
-    digest_top_n = fetch_digest_settings()["digest_top_n"]
+def _fetch_top_by_category(top_n: int, days: int, *, undigested: bool) -> dict[str, list[dict]] | None:
+    """Top-N already-scored items per DIGEST_SECTIONS category, from the
+    scoring-service. None if it cannot be reached (already logged)."""
     top_by_category = {}
     for category, _heading in DIGEST_SECTIONS:
+        params = {"days": days, "limit": top_n, "category": category}
+        if undigested:
+            params["undigested"] = True
         try:
-            resp = httpx.get(
-                f"{config.SCORING_SERVICE_URL}/items/top",
-                params={
-                    "days": config.MANUAL_DIGEST_LOOKBACK_DAYS,
-                    "limit": digest_top_n,
-                    "category": category,
-                },
-                timeout=30.0,
-            )
+            resp = httpx.get(f"{config.SCORING_SERVICE_URL}/items/top", params=params, timeout=30.0)
             resp.raise_for_status()
         except httpx.HTTPError:
             logger.exception("Kon /items/top (%s) niet ophalen — geen digest verstuurd.", category)
-            return
+            return None
 
         items = resp.json()
         for item in items:
             item["source_name"] = _source_name(item["source_url"])
         top_by_category[category] = items
+    return top_by_category
 
-    total = sum(len(items) for items in top_by_category.values())
-    if total == 0:
+
+def run() -> None:
+    """The scheduled digest: the best items of the last DIGEST_LOOKBACK_DAYS days
+    that were not mailed yet, top-N per category. After a real send they are
+    marked as mailed. Nothing is marked on a dry run or when sending fails, so
+    the same items are tried again next time instead of getting lost."""
+    top_n = fetch_digest_settings()["digest_top_n"]
+    top_by_category = _fetch_top_by_category(top_n, config.DIGEST_LOOKBACK_DAYS, undigested=True)
+    if top_by_category is None:
+        return
+
+    counts = {category: len(items) for category, items in top_by_category.items()}
+    if not any(counts.values()):
+        logger.info(
+            "Geen nieuwe gescoorde items in de laatste %d dagen — geen digest verstuurd.",
+            config.DIGEST_LOOKBACK_DAYS,
+        )
+        return
+    logger.info("Digest: %s.", ", ".join(f"{n} {category}" for category, n in counts.items()))
+
+    if not send_digest(build_digest_html(top_by_category)):
+        return  # dry run: leave the items unmarked
+
+    item_ids = [item["item_id"] for items in top_by_category.values() for item in items]
+    try:
+        resp = httpx.post(
+            f"{config.SCORING_SERVICE_URL}/items/mark-digested", json={"item_ids": item_ids}, timeout=30.0
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError:
+        logger.exception(
+            "Digest is verstuurd, maar de items konden niet als gemaild worden gemarkeerd — "
+            "ze kunnen in de volgende digest opnieuw voorkomen."
+        )
+
+
+def run_now() -> None:
+    """Immediate digest for the admin GUI's "verstuur nu" button: the best
+    items of the last MANUAL_DIGEST_LOOKBACK_DAYS days, top-N per category.
+    A preview: it does not skip items mailed before and does not mark
+    anything, so it never takes items away from the scheduled digest."""
+    top_n = fetch_digest_settings()["digest_top_n"]
+    top_by_category = _fetch_top_by_category(top_n, config.MANUAL_DIGEST_LOOKBACK_DAYS, undigested=False)
+    if top_by_category is None:
+        return
+
+    if not any(top_by_category.values()):
         logger.info(
             "Geen gescoorde items in de laatste %d dagen — geen digest verstuurd.",
             config.MANUAL_DIGEST_LOOKBACK_DAYS,

@@ -1,7 +1,8 @@
-"""APScheduler entrypoint: starts daily_digest, weekly_discovery and
-mailbox_ingest on their configured schedules. Each job is also runnable
-standalone for testing, e.g.:
+"""APScheduler entrypoint: starts ingest (continuously), daily_digest,
+weekly_discovery and mailbox_ingest on their configured schedules. Each job is
+also runnable standalone for testing, e.g.:
 
+    uv run python -m jobs.ingest
     uv run python -m jobs.daily_digest
     uv run python -m jobs.weekly_discovery
     uv run python -m jobs.mailbox_ingest
@@ -14,7 +15,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 import config
 import trigger_server
-from jobs import daily_digest, mailbox_ingest, weekly_discovery
+from jobs import daily_digest, ingest, mailbox_ingest, weekly_discovery
 from remote_settings import fetch_digest_settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -35,8 +36,20 @@ def _sync_digest_schedule(scheduler: BlockingScheduler) -> None:
         _current_digest_hour = new_hour
 
 
-def main() -> None:
-    scheduler = BlockingScheduler()
+def _add_jobs(scheduler: BlockingScheduler) -> None:
+    # Scoring is the slow, rate-limited part, so it runs all day in the
+    # background; the daily digest below only mails what is already scored.
+    # max_instances=1 + coalesce: a run that outlasts the interval (a big
+    # backlog on the free Voyage tier) makes the next tick(s) skip, not pile up.
+    scheduler.add_job(
+        ingest.run,
+        "interval",
+        minutes=config.INGEST_INTERVAL_MINUTES,
+        id="ingest",
+        name="Feeds ophalen en scoren",
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.add_job(
         daily_digest.run,
         CronTrigger(hour=config.DIGEST_HOUR, minute=0),
@@ -64,6 +77,11 @@ def main() -> None:
         name="Digest-uur synchroniseren vanuit admin-GUI",
     )
 
+
+def main() -> None:
+    scheduler = BlockingScheduler()
+    _add_jobs(scheduler)
+
     # Keep a reference so the server (and its background thread) isn't
     # garbage-collected once main() returns control to scheduler.start().
     _trigger_server_handle = trigger_server.start(  # noqa: F841
@@ -71,9 +89,10 @@ def main() -> None:
     )
 
     logger.info(
-        "Scheduler gestart: daily_digest dagelijks om %02d:00, weekly_discovery op %s om %02d:00, "
-        "mailbox_ingest dagelijks om %02d:00 (enabled=%s), trigger-server op poort %d",
-        config.DIGEST_HOUR, config.DISCOVERY_DAY, config.DISCOVERY_HOUR,
+        "Scheduler gestart: ingest elke %d min (eerste run na dat interval), daily_digest dagelijks om %02d:00, "
+        "weekly_discovery op %s om %02d:00, mailbox_ingest dagelijks om %02d:00 (enabled=%s), "
+        "trigger-server op poort %d",
+        config.INGEST_INTERVAL_MINUTES, config.DIGEST_HOUR, config.DISCOVERY_DAY, config.DISCOVERY_HOUR,
         config.MAILBOX_INGEST_HOUR, config.MAILBOX_INGEST_ENABLED, config.TRIGGER_SERVER_PORT,
     )
     scheduler.start()

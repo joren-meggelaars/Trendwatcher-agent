@@ -140,3 +140,44 @@ def test_scoring_the_same_url_twice_returns_the_existing_item_without_embedding(
     assert second["item_id"] == first["item_id"]
     assert calls == []  # no embedding request for an already-stored URL
     assert len(client.get("/items/top", params={"limit": 50}).json()) == 1
+
+
+def test_top_items_undigested_skips_items_already_mailed(client):
+    first = _score(client, "first article")
+    second = _score(client, "second article")
+
+    resp = client.post("/items/mark-digested", json={"item_ids": [first["item_id"]]})
+    assert resp.status_code == 200 and resp.json() == {"marked": 1}
+
+    everything = [i["item_id"] for i in client.get("/items/top", params={"limit": 10}).json()]
+    undigested = [i["item_id"] for i in client.get("/items/top", params={"limit": 10, "undigested": True}).json()]
+    assert set(everything) == {first["item_id"], second["item_id"]}
+    assert undigested == [second["item_id"]]
+
+
+def test_top_items_undigested_combines_with_category_before_limit(client):
+    mailed = _score(client, "Acme acquires Globex")
+    fresh = _score(client, "Globex raises $20M Series A")
+    client.post("/items/mark-digested", json={"item_ids": [mailed["item_id"]]})
+
+    resp = client.get("/items/top", params={"limit": 1, "category": "markt", "undigested": True})
+
+    assert [i["item_id"] for i in resp.json()] == [fresh["item_id"]]
+
+
+def test_mark_digested_is_idempotent_ignores_unknown_ids_and_keeps_first_timestamp(client, db_session):
+    item = _score(client, "some article")
+
+    first = client.post("/items/mark-digested", json={"item_ids": [item["item_id"], 999999]}).json()
+    stamp = db_session.get(models.Item, item["item_id"]).digested_at
+    second = client.post("/items/mark-digested", json={"item_ids": [item["item_id"]]}).json()
+    db_session.expire_all()
+
+    assert first == {"marked": 1}  # the unknown id is ignored
+    assert second == {"marked": 0}
+    assert db_session.get(models.Item, item["item_id"]).digested_at == stamp
+
+
+def test_mark_digested_rejects_empty_and_oversized_lists(client):
+    assert client.post("/items/mark-digested", json={"item_ids": []}).status_code == 422
+    assert client.post("/items/mark-digested", json={"item_ids": list(range(201))}).status_code == 422
