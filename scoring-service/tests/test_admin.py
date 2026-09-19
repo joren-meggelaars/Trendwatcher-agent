@@ -81,23 +81,16 @@ def test_override_source_status_updates_existing_source(admin_client):
 
 
 def test_batch_add_reports_successes_and_a_clear_failure(admin_client, monkeypatch):
-    import httpx
-
     import app.admin as admin_module
+    from app import safe_fetch
 
-    class _FakeResponse:
-        def __init__(self, text: str) -> None:
-            self.text = text
-
-        def raise_for_status(self) -> None:
-            pass
-
-    def _fake_get(url, timeout, follow_redirects):
+    def _fake_fetch(url, max_bytes):
         if "unreachable" in url:
-            raise httpx.ConnectError("connection failed", request=httpx.Request("GET", url))
-        return _FakeResponse(f"<html><head><title>Title for {url}</title></head><body>Some article body text.</body></html>")
+            raise safe_fetch.FetchError("kon geen verbinding maken")
+        html = f"<html><head><title>Title for {url}</title></head><body>Some article body text.</body></html>"
+        return safe_fetch.FetchResult(html.encode(), url, 200, "text/html; charset=utf-8")
 
-    monkeypatch.setattr(admin_module.httpx, "get", _fake_get)
+    monkeypatch.setattr(admin_module.safe_fetch, "fetch", _fake_fetch)
 
     resp = admin_client.post(
         "/admin/items/batch-add",

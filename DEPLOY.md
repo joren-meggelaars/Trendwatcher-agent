@@ -194,6 +194,36 @@ location / {
 Zonder `FEEDBACK_BASE_URL` gebruiken de mailknoppen `http://<BIND_ADDRESS>:8000`,
 dus alleen bruikbaar in je eigen netwerk.
 
+## Veilig ophalen van bronnen
+
+Alles wat het systeem van internet haalt gaat via één functie (`safe_fetch.py`,
+één kopie per project): de feeds die de scheduler leest, de pagina's achter
+zoekresultaten, en de pagina's bij "Losse items toevoegen". Die functie:
+
+- accepteert alleen `http://` en `https://` (geen `file:`, `ftp:`, `javascript:`
+  enz.), geen adressen met gebruikersnaam/wachtwoord, en alleen de poorten
+  80, 443, 8080 en 8443;
+- weigert adressen die naar het eigen netwerk wijzen: localhost, `10.x`,
+  `172.16–31.x`, `192.168.x`, `169.254.x` (cloud-metadata), `100.64.x`, IPv6-
+  varianten daarvan, en namen die daarnaartoe wijzen. Dat geldt ook na elke
+  redirect. De naam wordt één keer opgezocht en de verbinding gaat naar dat
+  gecontroleerde adres, zodat een naam die na de controle iets anders gaat
+  antwoorden niets oplevert;
+- kapt af na 5 redirects, 30 seconden in totaal, en op een maximale grootte
+  (na uitpakken; 10 MB voor feeds, 2 MB voor pagina's).
+
+Bij het aanmaken van een bron (formulier, API, seed) worden dezelfde regels
+toegepast op het adres zelf, en in de GUI worden links van feeds alleen
+klikbaar als ze met `http(s)://` beginnen.
+
+Wat dit **niet** doet: beoordelen of een site zelf kwaadaardig is. Wil je dat
+ook, dan kan een DNS-filter op de VM of het netwerk (bijv. Quad9, `9.9.9.9`)
+bekende malware-domeinen blokkeren zonder codewijziging.
+
+Voor testen tegen een lokale server kun je in `.env` `SAFE_FETCH_ALLOW_PRIVATE=true`
+zetten; dat laat interne adressen toe (het schema blijft beperkt tot http(s)).
+Laat dit op de VM op `false`.
+
 ## 7. Geautomatiseerde tests draaien tegen de Postgres-container
 
 De bestaande testsuite (scoring, feedback, sources, scheduler-support,

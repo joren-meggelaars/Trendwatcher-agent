@@ -18,7 +18,14 @@ import httpx
 
 import config
 import rate_limit
+import safe_fetch
 from seen_items import SeenItemsCache
+
+# The largest feed accepted (bytes, after decompression). The biggest real ones
+# we read are around 1.5 MB (IETF, ~600 entries); this leaves room and still
+# stops a feed that is meant to exhaust memory.
+MAX_FEED_BYTES = 10_000_000
+_FEED_ACCEPT = "application/atom+xml,application/rdf+xml,application/rss+xml,application/x-netcdf,application/xml;q=0.9,text/xml;q=0.2,*/*;q=0.1"
 
 # score_entry retries a failed POST /score up to twice, waiting these many
 # seconds before each retry, before giving up on the item.
@@ -42,7 +49,25 @@ def fetch_new_entries(source: dict, seen: SeenItemsCache) -> list[dict]:
     marked as seen without being scored, so that backlog is not re-attempted
     every run. 0 = no limit.
     """
-    parsed = feedparser.parse(source["url"])
+    # The feed address is somebody else's input. Download it the safe way first
+    # (public addresses only, pinned, time and size limits; see safe_fetch.py)
+    # and only then parse the bytes: feedparser must never be handed an address
+    # itself — it would open local files, follow any redirect and wait forever.
+    try:
+        downloaded = safe_fetch.fetch(
+            source["url"],
+            max_bytes=MAX_FEED_BYTES,
+            headers={"User-Agent": feedparser.USER_AGENT, "Accept": _FEED_ACCEPT},
+        )
+    except safe_fetch.FetchError as exc:
+        logger.warning("Bron niet opgehaald (%s): %s", source["url"], exc)
+        return []
+    parsed = feedparser.parse(
+        downloaded.content,
+        # what feedparser would have learned from fetching the URL itself:
+        # the declared encoding, and the base for relative links in the entries
+        response_headers={"content-type": downloaded.content_type or "", "content-location": downloaded.url},
+    )
     source_name = parsed.feed.get("title") or source["url"]
     new_entries = []  # (published, entry)
     for entry in parsed.entries:

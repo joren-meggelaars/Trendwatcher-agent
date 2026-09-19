@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # https://trend.example.com. Used to accept form posts from that origin when
     # a reverse proxy rewrites the Host header. Empty = only the Host header.
     public_base_url: str = ""
+    # Switches off the "only public addresses" check of app/safe_fetch.py (batch-add,
+    # discovery). For a local test setup only; console-only, never on the VM.
+    safe_fetch_allow_private: bool = False
 
     # Base URL of the scheduler's small internal trigger server (see
     # scheduler/trigger_server.py), used only by the admin GUI's "verstuur nu"

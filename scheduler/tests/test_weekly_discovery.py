@@ -22,3 +22,32 @@ def test_extract_search_terms_returns_at_most_top_n():
 
 def test_extract_search_terms_handles_empty_input():
     assert extract_search_terms([], top_n=5) == []
+
+
+# --- a search result is fetched through safe_fetch --------------------------------------------------------
+
+
+def test_a_search_result_pointing_inside_is_not_fetched_and_falls_back_to_the_snippet(monkeypatch):
+    import httpx
+    import rate_limit
+    import safe_fetch
+    from jobs import weekly_discovery
+    from search_provider import SearchResult
+
+    def refuse(url, **kwargs):
+        raise safe_fetch.UnsafeURL("het adres wijst naar een intern of niet-openbaar netwerk")
+
+    posted = {}
+
+    class _Client:
+        def post(self, url, json):
+            posted.update(json)
+            return httpx.Response(200, json={"id": 1}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(weekly_discovery.safe_fetch, "fetch", refuse)
+    monkeypatch.setattr(rate_limit, "wait_for_scoring_slot", lambda: None)
+    result = SearchResult(title="Interne pagina", url="http://10.0.100.8:8080/admin", snippet="alleen de snippet")
+
+    weekly_discovery.score_search_result(_Client(), result, {"id": 7, "url": "10.0.100.8"})
+
+    assert posted["raw_content"] == "alleen de snippet" and posted["source_id"] == 7

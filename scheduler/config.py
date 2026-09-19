@@ -87,6 +87,10 @@ MAILBOX_INGEST_FOLDER = os.environ.get("MAILBOX_INGEST_FOLDER", "inbox")
 MAILBOX_INGEST_MAX_MESSAGES = int(os.environ.get("MAILBOX_INGEST_MAX_MESSAGES", "25"))
 MAILBOX_INGEST_HOUR = int(os.environ.get("MAILBOX_INGEST_HOUR", "6"))
 
+# Switches off the "only public addresses" check for everything the scheduler
+# downloads (safe_fetch.py). Local testing only; console-only, never on the VM.
+SAFE_FETCH_ALLOW_PRIVATE = os.environ.get("SAFE_FETCH_ALLOW_PRIVATE", "false").strip().lower() in ("1", "true", "yes")
+
 # How far back (days) the admin GUI's "verstuur nu" digest looks for the best
 # already-scored items (see daily_digest.run_now). It doesn't score anything.
 MANUAL_DIGEST_LOOKBACK_DAYS = int(os.environ.get("MANUAL_DIGEST_LOOKBACK_DAYS", "7"))

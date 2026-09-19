@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
-from app import models, runtime_settings, schemas
+from app import models, runtime_settings, schemas, urlsafety
 
 # Matches plain http(s) URLs whether they sit inside an HTML href="..." attribute
 # or as bare text — good enough to register candidate domains without needing an
@@ -34,6 +34,7 @@ def create_source(
     `status` defaults to "kandidaat" (the normal instroom path); only the seed
     script passes anything else, for sources whose feed it has verified itself.
     """
+    urlsafety.validate_source_url(url, type_)  # ValueError for file:, internal addresses, paths, ...
     if status not in _STATUSES:
         raise ValueError(f"Unknown source status {status!r}")
     if category is not None and category not in _CATEGORIES:

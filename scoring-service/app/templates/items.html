@@ -37,7 +37,7 @@
 <tbody>
 {% for item in items %}
 <tr>
-  <td><a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.title|clean_text }}</a></td>
+  <td><a href="{{ item.url|safe_url }}" target="_blank" rel="noopener noreferrer">{{ item.title|clean_text }}</a></td>
   <td>{{ item.source_ref.url if item.source_ref else item.source }}</td>
   <td>{{ "%.2f"|format(item.relevance_score) if item.relevance_score is not none else "—" }}</td>
   <td>

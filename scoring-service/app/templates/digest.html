@@ -24,7 +24,7 @@
 </div>
 {% for card in section.cards %}
 <article class="item-card {{ 'voted-up' if card.vote == 'like' }}{{ 'voted-down' if card.vote == 'dislike' }}" data-item="{{ card.id }}" data-vote="{{ card.vote or '' }}">
-  <h3 class="item-title"><a href="{{ card.url }}" target="_blank" rel="noopener noreferrer">{{ card.title }}</a></h3>
+  <h3 class="item-title"><a href="{{ card.url|safe_url }}" target="_blank" rel="noopener noreferrer">{{ card.title }}</a></h3>
   <div class="item-meta">
     <span>{{ card.source }}</span>
     {% if card.score is not none %}<span>score {{ "%.2f"|format(card.score) }}</span>{% endif %}

@@ -295,9 +295,12 @@ def create_source(
     payload: schemas.SourceCreate,
     db: Session = Depends(get_db),
 ) -> models.Source:
-    source = discovery.create_source(
-        db, payload.url, payload.type, payload.discovery_method, category=payload.category
-    )
+    try:
+        source = discovery.create_source(
+            db, payload.url, payload.type, payload.discovery_method, category=payload.category
+        )
+    except ValueError as exc:  # an address that may not become a source (app/urlsafety.py)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if source is None:
         raise HTTPException(status_code=409, detail=f"Source with url {payload.url!r} already exists")
     return source

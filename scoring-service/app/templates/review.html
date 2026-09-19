@@ -35,7 +35,7 @@
 <div id="cards" data-category="{{ category }}">
 {% for card in cards %}
 <article class="item-card active-card" data-id="{{ card.id }}">
-  <h3 class="item-title"><a href="{{ card.url }}" target="_blank" rel="noopener noreferrer">{{ card.title }}</a></h3>
+  <h3 class="item-title"><a href="{{ card.url|safe_url }}" target="_blank" rel="noopener noreferrer">{{ card.title }}</a></h3>
   <div class="item-meta">
     <span>{{ card.source }}</span>
     <span class="badge badge-{{ card.category }}">{{ card.category }}</span>

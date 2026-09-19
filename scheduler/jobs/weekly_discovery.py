@@ -15,6 +15,7 @@ import httpx
 
 import config
 import rate_limit
+import safe_fetch
 from search_provider import SearchResult, get_search_provider
 
 logger = logging.getLogger(__name__)
@@ -71,12 +72,13 @@ def ensure_source_for_domain(client: httpx.Client, domain: str) -> dict:
 
 
 def score_search_result(client: httpx.Client, result: SearchResult, source: dict) -> dict:
+    # A search result is an address somebody else chose: only public addresses,
+    # pinned, with time and size limits (see safe_fetch.py).
     try:
-        page = httpx.get(result.url, timeout=15.0, follow_redirects=True)
-        page.raise_for_status()
+        page = safe_fetch.fetch(result.url, max_bytes=2_000_000)
         raw_content = _strip_html(page.text)[:5000] or result.snippet or result.title
-    except httpx.HTTPError:
-        logger.warning("Kon pagina niet ophalen voor %s, val terug op snippet/titel", result.url)
+    except safe_fetch.FetchError as exc:
+        logger.warning("Kon pagina niet ophalen voor %s (%s), val terug op snippet/titel", result.url, exc)
         raw_content = result.snippet or result.title
 
     payload = {

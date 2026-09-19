@@ -6,6 +6,7 @@ import pytest
 
 import config
 import jobs.ingest as ingest
+import safe_fetch
 
 
 class _FakeResponse:
@@ -123,7 +124,11 @@ def _entry(n: int, day: int | None):
 
 def _patch_feed(monkeypatch, entries, limit):
     parsed = SimpleNamespace(feed={"title": "Test Feed"}, entries=entries)
-    monkeypatch.setattr(ingest.feedparser, "parse", lambda url: parsed)
+    monkeypatch.setattr(
+        ingest.safe_fetch, "fetch",
+        lambda url, **kwargs: safe_fetch.FetchResult(b"<feed/>", url, 200, "text/xml"),
+    )
+    monkeypatch.setattr(ingest.feedparser, "parse", lambda content, **kwargs: parsed)
     monkeypatch.setattr(config, "MAX_NEW_ENTRIES_PER_SOURCE", limit)
 
 
@@ -180,3 +185,65 @@ def test_undated_entries_keep_feed_order_after_dated_ones(monkeypatch):
 
     assert [e["link"] for e in entries] == ["https://example.com/3", "https://example.com/1"]
     assert seen.marked == ["https://example.com/2"]
+
+
+# --- the feed is downloaded through safe_fetch, never by feedparser itself ------------------------
+
+
+def test_a_feed_that_cannot_be_downloaded_gives_no_entries_and_is_never_parsed(monkeypatch):
+    def refuse(url, **kwargs):
+        raise safe_fetch.UnsafeURL("het adres wijst naar een intern of niet-openbaar netwerk")
+
+    monkeypatch.setattr(ingest.safe_fetch, "fetch", refuse)
+    monkeypatch.setattr(ingest.feedparser, "parse", lambda *a, **k: pytest.fail("must not parse what was not downloaded"))
+
+    assert ingest.fetch_new_entries({"id": 1, "url": "http://10.0.100.8:8080/health"}, _RecordingSeen()) == []
+
+
+def test_a_slow_or_broken_feed_gives_no_entries(monkeypatch):
+    def fail(url, **kwargs):
+        raise safe_fetch.FetchError("het ophalen duurde te lang")
+
+    monkeypatch.setattr(ingest.safe_fetch, "fetch", fail)
+
+    assert ingest.fetch_new_entries(_SOURCE, _RecordingSeen()) == []
+
+
+def test_feedparser_gets_the_downloaded_bytes_with_the_headers_of_the_real_response(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        ingest.safe_fetch, "fetch",
+        lambda url, **kwargs: captured.update(url=url, **kwargs) or safe_fetch.FetchResult(
+            b"<rss/>", "https://example.com/final/feed", 200, "application/rss+xml; charset=utf-8"
+        ),
+    )
+    monkeypatch.setattr(
+        ingest.feedparser, "parse",
+        lambda content, **kwargs: captured.update(content=content, parse_headers=kwargs["response_headers"]) or SimpleNamespace(feed={}, entries=[]),
+    )
+
+    ingest.fetch_new_entries(_SOURCE, _RecordingSeen())
+
+    assert captured["url"] == "https://example.com/feed" and captured["max_bytes"] == ingest.MAX_FEED_BYTES
+    assert "User-Agent" in captured["headers"] and "rss" in captured["headers"]["Accept"]
+    assert captured["content"] == b"<rss/>"
+    assert captured["parse_headers"] == {"content-type": "application/rss+xml; charset=utf-8", "content-location": "https://example.com/final/feed"}
+
+
+def test_the_real_download_path_reads_a_feed_and_refuses_local_ones(monkeypatch):
+    """No patching of feedparser: a feed served by a (fake) public host is parsed, a local file is not read."""
+    monkeypatch.setattr(config, "MAX_NEW_ENTRIES_PER_SOURCE", 0)
+    rss = (
+        b'<?xml version="1.0"?><rss version="2.0"><channel><title>Feed</title>'
+        b"<item><title>A</title><link>https://example.com/a</link></item></channel></rss>"
+    )
+    monkeypatch.setattr(
+        ingest.safe_fetch, "fetch",
+        lambda url, **kwargs: safe_fetch.FetchResult(rss, url, 200, "application/rss+xml"),
+    )
+
+    entries = ingest.fetch_new_entries(_SOURCE, _RecordingSeen())
+    assert [e["link"] for e in entries] == ["https://example.com/a"] and entries[0]["source_name"] == "Feed"
+
+    monkeypatch.undo()  # the real fetch: a file address must be refused before anything is read
+    assert ingest.fetch_new_entries({"id": 2, "url": "file:///etc/passwd"}, _RecordingSeen()) == []

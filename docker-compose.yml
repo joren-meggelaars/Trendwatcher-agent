@@ -55,6 +55,9 @@ services:
       # Internal-only — the scheduler's trigger server, for the admin GUI's
       # "verstuur nu" button. Reachable via the shared network, not the host.
       SCHEDULER_URL: http://scheduler:${TRIGGER_SERVER_PORT:-8001}
+      # Console-only, local testing only: turns off the check that stops the server
+      # from fetching internal addresses (app/safe_fetch.py). Never true on the VM.
+      SAFE_FETCH_ALLOW_PRIVATE: ${SAFE_FETCH_ALLOW_PRIVATE:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -93,6 +96,9 @@ services:
       # posts from this origin are accepted even if the proxy rewrites Host.
       PUBLIC_BASE_URL: ${FEEDBACK_BASE_URL:-http://${BIND_ADDRESS}:8000}
       SCHEDULER_URL: http://scheduler:${TRIGGER_SERVER_PORT:-8001}
+      # Console-only, local testing only: turns off the check that stops the server
+      # from fetching internal addresses (app/safe_fetch.py). Never true on the VM.
+      SAFE_FETCH_ALLOW_PRIVATE: ${SAFE_FETCH_ALLOW_PRIVATE:-false}
     depends_on:
       scoring-service:
         condition: service_healthy
@@ -149,6 +155,7 @@ services:
       TRIGGER_SERVER_PORT: ${TRIGGER_SERVER_PORT:-8001}
       SETTINGS_SYNC_INTERVAL_SECONDS: ${SETTINGS_SYNC_INTERVAL_SECONDS:-300}
       SEEN_ITEMS_PATH: /app/data/seen_items.json
+      SAFE_FETCH_ALLOW_PRIVATE: ${SAFE_FETCH_ALLOW_PRIVATE:-false}
     volumes:
       - trendwatch_scheduler_data:/app/data
     depends_on:

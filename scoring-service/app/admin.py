@@ -18,7 +18,19 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app import digest_settings, digest_view, discovery, models, review, runtime_settings, schemas, scoring, security, textclean
+from app import (
+    digest_settings,
+    digest_view,
+    discovery,
+    models,
+    review,
+    runtime_settings,
+    safe_fetch,
+    schemas,
+    scoring,
+    security,
+    textclean,
+)
 from app.auth import (
     REMEMBER_DAYS,
     SESSION_MAX_AGE,
@@ -37,6 +49,15 @@ router = APIRouter(prefix="/admin")
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 # Items stored before titles were cleaned still carry HTML entities.
 templates.env.filters["clean_text"] = textclean.clean_text
+
+
+def _safe_url(value: str | None) -> str:
+    """For an href: the URL if it is http(s), otherwise '#'. Feed data decides
+    these addresses, so a javascript: or data: link must never become a link."""
+    return value if value and value.strip().lower().startswith(("http://", "https://")) else "#"
+
+
+templates.env.filters["safe_url"] = _safe_url
 
 ITEMS_PER_PAGE = 50
 
@@ -160,6 +181,7 @@ def logout(request: Request) -> RedirectResponse:
 def list_sources_page(
     request: Request,
     status: str | None = None,
+    error: str | None = None,
     db: Session = Depends(get_db),
     _admin: None = Depends(require_admin_session),
 ):
@@ -183,6 +205,7 @@ def list_sources_page(
             "item_counts": item_counts,
             "statuses": _STATUSES,
             "current_status": status if status in _STATUSES else None,
+            "error": error[:200] if error else None,
         },
     )
 
@@ -194,7 +217,10 @@ def create_source_from_admin(
     db: Session = Depends(get_db),
     _admin: None = Depends(require_admin_session),
 ) -> RedirectResponse:
-    discovery.create_source(db, url, type, "manual")
+    try:
+        discovery.create_source(db, url, type, "manual")
+    except ValueError as exc:  # an address that may not become a source (see app/urlsafety.py)
+        return RedirectResponse(url=f"/admin/sources?{urlencode({'error': f'Bron niet toegevoegd: {exc}.'})}", status_code=303)
     return RedirectResponse(url="/admin/sources", status_code=303)
 
 
@@ -312,15 +338,20 @@ def batch_add_submit(
             results.append({"url": url, "ok": False, "reason": "Ongeldige URL (moet met http(s):// beginnen)."})
             continue
 
+        # The address is somebody else's input: fetch it the safe way (public
+        # addresses only, pinned, size and time limits; see app/safe_fetch.py).
         try:
-            page_resp = httpx.get(url, timeout=15.0, follow_redirects=True)
-            page_resp.raise_for_status()
-        except httpx.HTTPError as exc:
-            results.append({"url": url, "ok": False, "reason": f"Kon content niet ophalen: {exc}"})
+            page = safe_fetch.fetch(url, max_bytes=2_000_000)
+        except safe_fetch.UnsafeURL as exc:
+            results.append({"url": url, "ok": False, "reason": f"Niet toegestaan: {exc}."})
+            continue
+        except safe_fetch.FetchError as exc:
+            results.append({"url": url, "ok": False, "reason": f"Kon content niet ophalen: {exc}."})
             continue
 
-        title = _extract_title(page_resp.text, fallback=url)
-        raw_content = _strip_html(page_resp.text)[:5000] or title
+        page_text = page.text
+        title = _extract_title(page_text, fallback=url)
+        raw_content = _strip_html(page_text)[:5000] or title
 
         # Broad catch is deliberate: one bad item (embedding-provider error,
         # unexpected response shape, ...) must not abort the rest of the

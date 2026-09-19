@@ -8,6 +8,8 @@
   </div>
 </div>
 
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+
 <div class="add-form">
   <h2>Nieuwe bron toevoegen</h2>
   <form method="post" action="/admin/sources" class="form-row">
@@ -36,7 +38,7 @@
 <tr>
   <td>{{ source.id }}</td>
   <td>
-    <a href="{{ source.url }}" target="_blank" rel="noopener noreferrer">{{ source.url }}</a>
+    <a href="{{ source.url|safe_url }}" target="_blank" rel="noopener noreferrer">{{ source.url }}</a>
     {% if source.notes %}<br><small>{{ source.notes }}</small>{% endif %}
   </td>
   <td>{{ source.type }}</td>
