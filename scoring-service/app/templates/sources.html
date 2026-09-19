@@ -9,6 +9,7 @@
 </div>
 
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
+{% if notice %}<p class="success">{{ notice }}</p>{% endif %}
 
 <div class="add-form">
   <h2>Nieuwe bron toevoegen</h2>
@@ -26,16 +27,29 @@
   {% endfor %}
 </div>
 
+<form id="bulk-form" class="bulk-bar" method="post" action="/admin/sources/bulk-status" data-bulk>
+  <input type="hidden" name="back" value="{{ current_status or '' }}">
+  <span class="bulk-count" data-bulk-count aria-live="polite">Niets geselecteerd</span>
+  <span class="bulk-actions">
+    <span class="hint">Zet geselecteerde op</span>
+    {% for s in statuses %}
+    <button type="submit" name="new_status" value="{{ s }}" class="btn btn-sm" data-bulk-action disabled>{{ s }}</button>
+    {% endfor %}
+  </span>
+</form>
+
 <div class="table-wrap">
-<table>
+<table class="select-table">
 <thead>
 <tr>
+  <th class="select-col"><input type="checkbox" data-bulk-all aria-label="Alles selecteren" title="Alles selecteren"></th>
   <th>ID</th><th>URL</th><th>Type</th><th>Categorie</th><th>Status</th><th>Gem. score</th><th>Items</th><th>Ontdekt via</th><th>Actie</th>
 </tr>
 </thead>
 <tbody>
 {% for source in sources %}
 <tr>
+  <td class="select-col"><input type="checkbox" name="ids" value="{{ source.id }}" form="bulk-form" data-bulk-row aria-label="Selecteer bron {{ source.id }}"></td>
   <td>{{ source.id }}</td>
   <td>
     <a href="{{ source.url|safe_url }}" target="_blank" rel="noopener noreferrer">{{ source.url }}</a>
@@ -60,9 +74,10 @@
   </td>
 </tr>
 {% else %}
-<tr><td colspan="9" class="muted">Geen bronnen gevonden.</td></tr>
+<tr><td colspan="10" class="muted">Geen bronnen gevonden.</td></tr>
 {% endfor %}
 </tbody>
 </table>
 </div>
 {% endblock %}
+{% block scripts %}<script src="/static/bulk.js" defer></script>{% endblock %}

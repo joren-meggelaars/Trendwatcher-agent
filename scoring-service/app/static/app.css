@@ -199,6 +199,16 @@ tr:hover td { background: var(--surface-2); }
 td small { color: var(--muted); }
 td a { overflow-wrap: anywhere; } /* long feed URLs wrap instead of pushing the other columns off screen */
 td:nth-child(2) { min-width: 12rem; }
+.select-table td:nth-child(2) { min-width: 0; }
+.select-table td:nth-child(3) { min-width: 12rem; }
+.select-col { width: 2.4rem; padding-right: 0; }
+
+/* the bar above a table whose rows can be ticked */
+.bulk-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; padding: 0.55rem 0.95rem;
+            margin-bottom: 0.6rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.bulk-bar.has-selection { background: var(--primary-soft); border-color: var(--primary); }
+.bulk-count { font-weight: 600; font-size: 0.9rem; }
+.bulk-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
 /* templates that put <tr> straight into <table> still get the card look */
 main > .container > table, main > .container > form > table { background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }

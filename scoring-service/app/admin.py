@@ -182,6 +182,7 @@ def list_sources_page(
     request: Request,
     status: str | None = None,
     error: str | None = None,
+    notice: str | None = None,
     db: Session = Depends(get_db),
     _admin: None = Depends(require_admin_session),
 ):
@@ -206,6 +207,7 @@ def list_sources_page(
             "statuses": _STATUSES,
             "current_status": status if status in _STATUSES else None,
             "error": error[:200] if error else None,
+            "notice": notice[:200] if notice else None,
         },
     )
 
@@ -236,6 +238,40 @@ def override_source_status(
         source.status = new_status
         db.commit()
     return RedirectResponse(url="/admin/sources", status_code=303)
+
+
+@router.post("/sources/bulk-status")
+def bulk_override_source_status(
+    new_status: str = Form(...),
+    ids: list[int] = Form(default=[]),
+    back: str = Form(default=""),
+    db: Session = Depends(get_db),
+    _admin: None = Depends(require_admin_session),
+) -> RedirectResponse:
+    """Set the status of the ticked sources in one go (same effect as the
+    per-row "Zet status", which stays available)."""
+    back_query = {"status": back} if back in _STATUSES else {}
+    if new_status not in _STATUSES:
+        return RedirectResponse(url=_sources_url(back_query, error="Onbekende status."), status_code=303)
+    wanted = set(ids)
+    if not wanted:
+        return RedirectResponse(url=_sources_url(back_query, error="Geen bronnen geselecteerd."), status_code=303)
+
+    changed = (
+        db.query(models.Source)
+        .filter(models.Source.id.in_(wanted), models.Source.status != new_status)
+        .update({models.Source.status: new_status}, synchronize_session=False)
+    )
+    db.commit()
+    unchanged = len(wanted) - changed
+    message = f"{changed} bron{'nen' if changed != 1 else ''} op {new_status} gezet"
+    if unchanged:
+        message += f" ({unchanged} had die status al of bestaat niet meer)"
+    return RedirectResponse(url=_sources_url(back_query, notice=message + "."), status_code=303)
+
+
+def _sources_url(query: dict[str, str], **flash: str) -> str:
+    return f"/admin/sources?{urlencode({**query, **flash})}"
 
 
 # --- items ------------------------------------------------------------------

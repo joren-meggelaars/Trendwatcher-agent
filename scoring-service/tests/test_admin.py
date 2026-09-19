@@ -190,3 +190,91 @@ def test_send_now_shows_error_when_scheduler_unreachable(admin_client, monkeypat
 
     assert resp.status_code == 200
     assert "Kon de scheduler niet bereiken" in resp.text
+
+
+# --- several sources at once ------------------------------------------------------------------------
+
+
+def _make_sources(admin_client, n):
+    ids = []
+    for i in range(n):
+        resp = admin_client.post("/sources", json={"url": f"https://bulk-{i}.example.com/feed", "type": "rss"})
+        ids.append(resp.json()["id"])
+    return ids
+
+
+def _statuses(admin_client):
+    return {s["id"]: s["status"] for s in admin_client.get("/sources").json()}
+
+
+def test_sources_page_has_a_checkbox_per_row_and_a_bar_with_the_three_statuses(admin_client):
+    ids = _make_sources(admin_client, 2)
+
+    page = admin_client.get("/admin/sources").text
+
+    for source_id in ids:
+        assert f'name="ids" value="{source_id}" form="bulk-form"' in page
+    assert "data-bulk-all" in page and 'action="/admin/sources/bulk-status"' in page
+    for status in ("kandidaat", "actief", "gedeactiveerd"):
+        assert f'name="new_status" value="{status}"' in page
+    assert "/static/bulk.js" in page and "<script>" not in page  # CSP: no inline script
+
+
+def test_bulk_status_changes_only_the_ticked_sources(admin_client):
+    a, b, c = _make_sources(admin_client, 3)
+
+    resp = admin_client.post("/admin/sources/bulk-status", data={"new_status": "actief", "ids": [a, c]}, follow_redirects=True)
+
+    assert resp.status_code == 200 and "2 bronnen op actief gezet" in resp.text
+    assert _statuses(admin_client) == {a: "actief", b: "kandidaat", c: "actief"}
+
+
+def test_bulk_status_can_deactivate_and_go_back_to_candidate(admin_client):
+    a, b = _make_sources(admin_client, 2)
+
+    admin_client.post("/admin/sources/bulk-status", data={"new_status": "gedeactiveerd", "ids": [a, b]})
+    assert set(_statuses(admin_client).values()) == {"gedeactiveerd"}
+
+    resp = admin_client.post("/admin/sources/bulk-status", data={"new_status": "kandidaat", "ids": [a]}, follow_redirects=True)
+    assert "1 bron op kandidaat gezet" in resp.text
+    assert _statuses(admin_client) == {a: "kandidaat", b: "gedeactiveerd"}
+
+
+def test_bulk_status_stays_on_the_filtered_tab_and_reports_what_did_not_change(admin_client):
+    a, b = _make_sources(admin_client, 2)
+
+    resp = admin_client.post(
+        "/admin/sources/bulk-status", data={"new_status": "kandidaat", "ids": [a, b, 9999], "back": "kandidaat"}, follow_redirects=False
+    )
+
+    assert resp.status_code == 303 and resp.headers["location"].startswith("/admin/sources?status=kandidaat&notice=")
+    page = admin_client.get(resp.headers["location"]).text
+    assert "0 bronnen op kandidaat gezet" in page and "3 had die status al of bestaat niet meer" in page
+
+
+def test_bulk_status_with_nothing_ticked_or_a_bad_status_changes_nothing(admin_client):
+    (a,) = _make_sources(admin_client, 1)
+
+    empty = admin_client.post("/admin/sources/bulk-status", data={"new_status": "actief"}, follow_redirects=True)
+    bad = admin_client.post("/admin/sources/bulk-status", data={"new_status": "verwijderd", "ids": [a]}, follow_redirects=True)
+    junk = admin_client.post("/admin/sources/bulk-status", data={"new_status": "actief", "ids": ["abc"]})
+
+    assert "Geen bronnen geselecteerd" in empty.text and "Onbekende status" in bad.text
+    assert junk.status_code == 422
+    assert _statuses(admin_client) == {a: "kandidaat"}
+
+
+def test_bulk_status_requires_login(client):
+    resp = client.post("/admin/sources/bulk-status", data={"new_status": "actief", "ids": [1]}, follow_redirects=False)
+
+    assert resp.status_code in (303, 401) and "login" in resp.headers.get("location", "login")
+
+
+def test_bulk_status_refuses_a_post_from_another_site(admin_client):
+    (a,) = _make_sources(admin_client, 1)
+
+    resp = admin_client.post(
+        "/admin/sources/bulk-status", data={"new_status": "actief", "ids": [a]}, headers={"Origin": "https://evil.example.com"}
+    )
+
+    assert resp.status_code == 403 and _statuses(admin_client) == {a: "kandidaat"}
