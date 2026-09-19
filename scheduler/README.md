@@ -96,6 +96,27 @@ admin-GUI van de scoring-service (`/admin/settings`) kan ze via
 Als de scoring-service niet bereikbaar is, valt elke job terug op de
 statische `DIGEST_HOUR`/`DIGEST_TOP_N`-waarden uit `.env`.
 
+## Overige instellingen aanpasbaar via de admin-GUI (`/admin/config`)
+
+Naast het digest-uur kun je de meeste tuning-instellingen uit `.env` in de GUI
+overschrijven (zie `runtime_settings.py`). `.env` blijft de basis: de scheduler
+onthoudt de waarden waarmee hij startte, meldt ze aan de scoring-service (zodat
+de pagina toont wat echt actief is) en haalt daar de overrides op
+(`GET /settings/runtime`) — elke `SETTINGS_SYNC_INTERVAL_SECONDS` en direct na
+opslaan (`POST /trigger/sync-settings` op de interne trigger-server). De waarden
+worden op de `config`-module gezet; alle jobs lezen `config.X` op het moment dat
+ze het nodig hebben, dus dat werkt zonder herstart. Alleen wat een tijdstip
+bepaalt (ingest-interval, discovery-dag/-uur, mailbox-uur) plant de betreffende
+job opnieuw in. Wordt een override verwijderd, dan geldt weer de `.env`-waarde.
+
+**Veiligheid:** `EDITABLE` in `runtime_settings.py` is een bewuste allow-list;
+de scoring-service heeft een eigen register en slaat alleen die sleutels op.
+Geheimen en instellingen die bepalen waar mail heen gaat of wat er gelezen wordt
+(`GRAPH_*`, `SEARCH_API_KEY`, `DIGEST_MAILBOX`, `DIGEST_TO_EMAIL`,
+`MAILBOX_INGEST_FOLDER`, `FEEDBACK_BASE_URL`, `SCORING_SERVICE_URL`, ...) staan
+er niet in en kunnen alleen via `.env` op de VM worden gewijzigd. Tests bewaken
+dat beide lijsten geen enkele van die sleutels bevatten.
+
 ## Scheduler draaien
 
 ```bash

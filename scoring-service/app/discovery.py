@@ -4,8 +4,7 @@ from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
-from app import models, schemas
-from app.config import settings
+from app import models, runtime_settings, schemas
 
 # Matches plain http(s) URLs whether they sit inside an HTML href="..." attribute
 # or as bare text — good enough to register candidate domains without needing an
@@ -151,20 +150,18 @@ def evaluate_source(db: Session, source_id: int) -> models.Source | None:
     if source is None:
         return None
 
+    # Thresholds: a value set in /admin/config wins over .env (see app/runtime_settings.py).
     if source.status == "kandidaat":
         recent_items = (
             db.query(models.Item)
             .filter(models.Item.source_id == source_id, models.Item.relevance_score.is_not(None))
             .order_by(models.Item.id.desc())
-            .limit(settings.source_activation_window)
+            .limit(runtime_settings.get(db, "SOURCE_ACTIVATION_WINDOW"))
             .all()
         )
-        high_score_count = sum(
-            1
-            for item in recent_items
-            if item.relevance_score > settings.source_activation_score_threshold
-        )
-        if high_score_count >= settings.source_activation_min_high_score:
+        score_threshold = runtime_settings.get(db, "SOURCE_ACTIVATION_SCORE_THRESHOLD")
+        high_score_count = sum(1 for item in recent_items if item.relevance_score > score_threshold)
+        if high_score_count >= runtime_settings.get(db, "SOURCE_ACTIVATION_MIN_HIGH_SCORE"):
             source.status = "actief"
 
     elif source.status == "actief":
@@ -172,7 +169,7 @@ def evaluate_source(db: Session, source_id: int) -> models.Source | None:
             db.query(models.Item)
             .filter(models.Item.source_id == source_id)
             .order_by(models.Item.id.desc())
-            .limit(settings.source_deactivation_window)
+            .limit(runtime_settings.get(db, "SOURCE_DEACTIVATION_WINDOW"))
             .all()
         )
         item_ids = [item.id for item in recent_items]
@@ -190,9 +187,9 @@ def evaluate_source(db: Session, source_id: int) -> models.Source | None:
 
         avg_too_low = (
             source.running_avg_score is not None
-            and source.running_avg_score < settings.source_deactivation_avg_score_threshold
+            and source.running_avg_score < runtime_settings.get(db, "SOURCE_DEACTIVATION_AVG_SCORE_THRESHOLD")
         )
-        if negative_count >= settings.source_deactivation_min_negative or avg_too_low:
+        if negative_count >= runtime_settings.get(db, "SOURCE_DEACTIVATION_MIN_NEGATIVE") or avg_too_low:
             source.status = "gedeactiveerd"
 
     db.commit()

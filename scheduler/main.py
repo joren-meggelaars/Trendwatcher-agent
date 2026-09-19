@@ -9,11 +9,14 @@ also runnable standalone for testing, e.g.:
 """
 
 import logging
+import threading
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 import config
+import runtime_settings
 import trigger_server
 from jobs import daily_digest, ingest, mailbox_ingest, weekly_discovery
 from remote_settings import fetch_digest_settings
@@ -22,18 +25,49 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger(__name__)
 
 _current_digest_hour = config.DIGEST_HOUR
+_sync_lock = threading.Lock()  # the sync tick and a "save" from the admin GUI can coincide
+
+# When each job runs, built from `config` at the moment it is needed — so
+# startup and a later settings change (see _sync_settings) always agree.
+# daily_digest is not here: its hour comes from the digest settings page.
+_TRIGGERS = {
+    "ingest": lambda: IntervalTrigger(minutes=config.INGEST_INTERVAL_MINUTES),
+    "weekly_discovery": lambda: CronTrigger(
+        day_of_week=config.DISCOVERY_DAY, hour=config.DISCOVERY_HOUR, minute=0
+    ),
+    "mailbox_ingest": lambda: CronTrigger(hour=config.MAILBOX_INGEST_HOUR, minute=0),
+}
+# Which settings a job's schedule depends on: when one changes, it is rescheduled.
+_SCHEDULE_SETTINGS = {
+    "ingest": {"INGEST_INTERVAL_MINUTES"},
+    "weekly_discovery": {"DISCOVERY_DAY", "DISCOVERY_HOUR"},
+    "mailbox_ingest": {"MAILBOX_INGEST_HOUR"},
+}
 
 
-def _sync_digest_schedule(scheduler: BlockingScheduler) -> None:
-    """Polled every SETTINGS_SYNC_INTERVAL_SECONDS: picks up an admin-GUI
-    change to the digest hour without needing a container restart. digest_top_n
-    doesn't need this — daily_digest.run() fetches it fresh on every run."""
+def _sync_settings(scheduler: BlockingScheduler) -> None:
+    """Polled every SETTINGS_SYNC_INTERVAL_SECONDS, and run right away when the
+    admin GUI saves: picks up changes made there without a container restart.
+
+    - Settings from /admin/config are applied to `config` (runtime_settings.py);
+      jobs whose schedule depends on one are rescheduled. Everything else is
+      read by the jobs at the moment they run, so it is live as soon as it is set.
+    - The digest hour (/admin/settings) is handled here too. digest_top_n needs
+      nothing: the digest fetches it fresh on every run.
+    """
     global _current_digest_hour
-    new_hour = fetch_digest_settings()["digest_hour"]
-    if new_hour != _current_digest_hour:
-        logger.info("Digest-uur gewijzigd: %d -> %d, herplannen.", _current_digest_hour, new_hour)
-        scheduler.reschedule_job("daily_digest", trigger=CronTrigger(hour=new_hour, minute=0))
-        _current_digest_hour = new_hour
+    with _sync_lock:
+        changed = runtime_settings.sync()
+        for job_id, keys in _SCHEDULE_SETTINGS.items():
+            if changed & keys:
+                logger.info("Planning van %s gewijzigd (%s), herplannen.", job_id, ", ".join(sorted(changed & keys)))
+                scheduler.reschedule_job(job_id, trigger=_TRIGGERS[job_id]())
+
+        new_hour = fetch_digest_settings()["digest_hour"]
+        if new_hour != _current_digest_hour:
+            logger.info("Digest-uur gewijzigd: %d -> %d, herplannen.", _current_digest_hour, new_hour)
+            scheduler.reschedule_job("daily_digest", trigger=CronTrigger(hour=new_hour, minute=0))
+            _current_digest_hour = new_hour
 
 
 def _add_jobs(scheduler: BlockingScheduler) -> None:
@@ -43,8 +77,7 @@ def _add_jobs(scheduler: BlockingScheduler) -> None:
     # backlog on the free Voyage tier) makes the next tick(s) skip, not pile up.
     scheduler.add_job(
         ingest.run,
-        "interval",
-        minutes=config.INGEST_INTERVAL_MINUTES,
+        _TRIGGERS["ingest"](),
         id="ingest",
         name="Feeds ophalen en scoren",
         max_instances=1,
@@ -58,34 +91,43 @@ def _add_jobs(scheduler: BlockingScheduler) -> None:
     )
     scheduler.add_job(
         weekly_discovery.run,
-        CronTrigger(day_of_week=config.DISCOVERY_DAY, hour=config.DISCOVERY_HOUR, minute=0),
+        _TRIGGERS["weekly_discovery"](),
         id="weekly_discovery",
         name="Wekelijkse discovery-sweep",
     )
     scheduler.add_job(
         mailbox_ingest.run,
-        CronTrigger(hour=config.MAILBOX_INGEST_HOUR, minute=0),
+        _TRIGGERS["mailbox_ingest"](),
         id="mailbox_ingest",
         name="Mailbox-ingest (nieuwsbrieven)",
     )
     scheduler.add_job(
-        _sync_digest_schedule,
+        _sync_settings,
         "interval",
         seconds=config.SETTINGS_SYNC_INTERVAL_SECONDS,
         args=[scheduler],
-        id="sync_digest_schedule",
-        name="Digest-uur synchroniseren vanuit admin-GUI",
+        id="sync_settings",
+        name="Instellingen synchroniseren vanuit admin-GUI",
     )
 
 
 def main() -> None:
+    # Apply what was set in the admin GUI before the jobs are scheduled, so a
+    # changed interval/hour is used from the very first schedule. The
+    # scoring-service is up (compose waits for its healthcheck); if it is not,
+    # the .env values are used until the first sync tick.
+    runtime_settings.sync()
+
     scheduler = BlockingScheduler()
     _add_jobs(scheduler)
 
     # Keep a reference so the server (and its background thread) isn't
     # garbage-collected once main() returns control to scheduler.start().
     _trigger_server_handle = trigger_server.start(  # noqa: F841
-        config.TRIGGER_SERVER_PORT, daily_digest.run, daily_digest.run_now
+        config.TRIGGER_SERVER_PORT,
+        daily_digest.run,
+        daily_digest.run_now,
+        lambda: _sync_settings(scheduler),
     )
 
     logger.info(

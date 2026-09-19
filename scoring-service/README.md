@@ -104,6 +104,21 @@ uv run python -m scripts.hash_admin_password   # genereert een bcrypt-hash
   elke URL wordt opgehaald, van HTML ontdaan en gescoord via dezelfde
   `score_and_store()`-functie die ook achter `POST /score` zit. Toont per
   URL succes (titel + score) of falen (reden).
+- `GET/POST /admin/config` — **Configuratie**: de instellingen die normaal in
+  `.env` staan, bewerkbaar zonder herstart (scorepauze, ingest-interval, dry-run,
+  discovery, mailbox-ingest, drempels voor bronnen-instroom/krimp, ...). Een
+  ingevulde waarde *overschrijft* `.env` (opgeslagen in de tabel
+  `runtime_settings`); een leeg veld volgt weer `.env`. Alles wordt gevalideerd
+  (type en bereik) en is alles-of-niets. De scheduler krijgt direct bericht en
+  plant zijn jobs zo nodig opnieuw in. **Geheimen en alles wat bepaalt waar mail
+  heen gaat blijven alleen via `.env` op de VM te wijzigen** (API-sleutels,
+  Graph-gegevens, admin-wachtwoord, `DIGEST_MAILBOX`/`DIGEST_TO_EMAIL`,
+  `FEEDBACK_BASE_URL`, embedding-model, netwerk-URL's, ...): die staan niet in
+  het register (`app/runtime_settings.py`), worden nooit opgeslagen of
+  getoond, en de pagina noemt ze onderaan alleen bij naam met de reden.
+  Voor de scheduler zijn er twee JSON-endpoints: `GET /settings/runtime`
+  (de overrides) en `POST /settings/runtime/env` (de scheduler meldt zijn
+  `.env`-waarden, alleen om te tonen wat echt actief is).
 
 ## Bronbeheer: instroom en krimp
 
@@ -116,8 +131,9 @@ er wordt geen externe request gedaan). Elke nieuwe bron start als
 
 `POST /sources/{id}/evaluate` (los aan te roepen, bijvoorbeeld vanuit een
 testscript; automatische aanroep vanuit een schema komt in Fase 3) past twee
-regels toe, met drempels in `app/config.py` / `.env` (geen codewijziging
-nodig om te kalibreren):
+regels toe, met drempels in `app/config.py` / `.env`, die je ook in de admin-GUI
+kunt overschrijven (`/admin/config`; geen codewijziging of herstart nodig om te
+kalibreren):
 
 - **Instroom** (`kandidaat` → `actief`): minstens
   `SOURCE_ACTIVATION_MIN_HIGH_SCORE` (standaard 3) van de laatste

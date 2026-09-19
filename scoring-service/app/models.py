@@ -104,6 +104,25 @@ class DigestSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
+class RuntimeSetting(Base):
+    """One row per setting from app/runtime_settings.py that can be changed in
+    the admin GUI without touching .env or restarting anything.
+
+    `override` is what an admin typed in (NULL = follow .env). `env_value` is
+    the .env value the owning service last reported, so the GUI can show what
+    is really in effect; only the scheduler reports (the scoring-service can
+    read its own env directly). Values are stored as text and parsed by the
+    registry. Never holds secrets: only registry keys are accepted.
+    """
+
+    __tablename__ = "runtime_settings"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    override: Mapped[str | None] = mapped_column(String, nullable=True)
+    env_value: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
 class Feedback(Base):
     __tablename__ = "feedback"
 

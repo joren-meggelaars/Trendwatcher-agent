@@ -18,7 +18,7 @@ def test_all_jobs_are_registered(monkeypatch):
 
     ids = {job.id for job in scheduler.get_jobs()}
 
-    assert ids == {"ingest", "daily_digest", "weekly_discovery", "mailbox_ingest", "sync_digest_schedule"}
+    assert ids == {"ingest", "daily_digest", "weekly_discovery", "mailbox_ingest", "sync_settings"}
 
 
 def test_ingest_runs_continuously_and_never_overlaps_itself(monkeypatch):

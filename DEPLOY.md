@@ -101,6 +101,16 @@ wacht nooit op de scoring. Bij de Voyage-gratis-tier
 ruim een uur op de achtergrond; met een betaalmethode
 (`SCORE_REQUEST_DELAY_SECONDS=0`) is het in minuten klaar.
 
+### Instellingen achteraf aanpassen
+
+Veel waarden uit `.env` (scorepauze, ingest-interval, dry-run, discovery, drempels
+voor bronnen, ...) kun je daarna in de admin-GUI aanpassen op
+`http://<BIND_ADDRESS>:8000/admin/config`, zonder herstart. `.env` blijft de
+basis: een leeg veld in de GUI volgt weer `.env`. Geheimen en instellingen die
+bepalen waar mail heen gaat (API-sleutels, Graph-gegevens, admin-wachtwoord,
+`DIGEST_MAILBOX`, `DIGEST_TO_EMAIL`, `FEEDBACK_BASE_URL`, ...) blijven bewust
+alleen via `.env` op de VM te wijzigen (daarna `docker compose up -d`).
+
 ## 6. Controleren dat alles draait
 
 ```bash

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Configuratie — Trendwatcher Admin{% endblock %}
+{% block content %}
+<h1>Configuratie</h1>
+
+{% if message %}<p class="success">{{ message }}</p>{% endif %}
+{% if warning %}<p class="error">{{ warning }}</p>{% endif %}
+{% if has_errors %}<p class="error">Niets opgeslagen: corrigeer de gemarkeerde velden.</p>{% endif %}
+
+<p style="color:#444; max-width:60rem">
+  Hier stel je de instellingen af die normaal in <code>.env</code> staan. Een ingevulde waarde
+  <strong>overschrijft</strong> <code>.env</code>; laat je een veld <strong>leeg</strong>, dan geldt weer de
+  waarde uit <code>.env</code>. Wijzigingen gelden direct, zonder herstart (de scheduler neemt ze zelf over).
+  Geheimen en instellingen die bepalen waar mail heen gaat, staan hier bewust niet en blijven alleen via de
+  console (<code>.env</code> op de VM) te wijzigen; zie onderaan.
+  Het digest-uur en het aantal items per digest staan op <a href="/admin/settings">Digest-instellingen</a>.
+</p>
+
+<form method="post" action="/admin/config" onsubmit="return confirmDryRun(this);">
+{% for group, rows in groups.items() %}
+<h2>{{ group }}</h2>
+<table>
+<tr><th style="width:22%">Instelling</th><th style="width:16%">Waarde</th><th style="width:14%">Uit .env</th><th>Uitleg</th></tr>
+{% for row in rows %}
+{% set spec = row.spec %}
+<tr>
+  <td>
+    <label for="s__{{ spec.key }}"><strong>{{ spec.label }}</strong></label><br>
+    <small style="color:#666"><code>{{ spec.key }}</code></small>
+    {% if row.overridden %}<br><span class="status status-kandidaat">overschreven</span>{% endif %}
+  </td>
+  <td>
+    {% if spec.kind == "bool" %}
+    <select id="s__{{ spec.key }}" name="s__{{ spec.key }}">
+      <option value="" {% if row.value == "" %}selected{% endif %}>volg .env</option>
+      <option value="true" {% if row.value == "true" %}selected{% endif %}>aan</option>
+      <option value="false" {% if row.value == "false" %}selected{% endif %}>uit</option>
+    </select>
+    {% elif spec.kind == "choice" %}
+    <select id="s__{{ spec.key }}" name="s__{{ spec.key }}">
+      <option value="" {% if row.value == "" %}selected{% endif %}>volg .env</option>
+      {% for choice in spec.choices %}
+      <option value="{{ choice }}" {% if row.value == choice %}selected{% endif %}>{{ choice }}</option>
+      {% endfor %}
+    </select>
+    {% else %}
+    <input id="s__{{ spec.key }}" name="s__{{ spec.key }}" value="{{ row.value }}"
+           {% if spec.kind == "int" %}type="number" step="1"{% else %}type="text" inputmode="decimal"{% endif %}
+           {% if spec.minimum is not none %}min="{{ spec.minimum }}"{% endif %}
+           {% if spec.maximum is not none %}max="{{ spec.maximum }}"{% endif %}
+           placeholder="{{ row.env_text if row.env_text is not none else row.default_text }}"
+           style="width:8rem">
+    {% endif %}
+    {% if row.error %}<div class="error" style="margin:0.25rem 0 0">{{ row.error }}</div>{% endif %}
+  </td>
+  <td>
+    {% if row.env_text is not none %}{{ row.env_text }}
+    {% else %}<span style="color:#888">onbekend<br><small>(standaard {{ row.default_text }})</small></span>{% endif %}
+  </td>
+  <td>
+    {{ spec.help }}
+    {% if spec.note %}<br><small style="color:#666">Bij wijzigen: {{ spec.note }}.</small>{% endif %}
+    {% if spec.minimum is not none and spec.maximum is not none %}
+    <br><small style="color:#666">Toegestaan: {{ "%g"|format(spec.minimum) }} t/m {{ "%g"|format(spec.maximum) }}.</small>
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+</table>
+{% endfor %}
+
+<button type="submit">Opslaan</button>
+</form>
+
+<h2>Alleen via de console</h2>
+<p style="color:#444; max-width:60rem">
+  Deze staan niet in de GUI en zijn hier ook niet zichtbaar (alleen de naam). Pas ze aan in <code>.env</code> op de
+  VM en start daarna de betreffende container opnieuw.
+</p>
+<table>
+<tr><th style="width:40%">Instelling</th><th>Waarom alleen via de console</th></tr>
+{% for item in console_only %}
+<tr><td><code>{{ item.name }}</code></td><td>{{ item.reason }}</td></tr>
+{% endfor %}
+</table>
+
+<script>
+function confirmDryRun(form) {
+  var field = form.elements["s__DIGEST_DRY_RUN"];
+  if (field && field.value === "false") {
+    return confirm("Dry-run staat dan uit: de dagelijkse digest wordt echt gemaild. Doorgaan?");
+  }
+  return true;
+}
+</script>
+{% endblock %}

@@ -17,7 +17,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app import digest_settings, discovery, models
+from app import digest_settings, discovery, models, runtime_settings
 from app.auth import NotAuthenticated, SESSION_KEY, require_admin_session, verify_admin_credentials
 from app.config import settings
 from app.database import get_db
@@ -336,6 +336,93 @@ def send_digest_now(
     return templates.TemplateResponse(
         request, "settings.html", {"settings": current, "sent": sent, "error": error},
     )
+
+
+# --- configuration (env-like settings) -----------------------------------
+
+
+def _render_config(
+    request: Request,
+    db: Session,
+    *,
+    submitted: dict[str, str] | None = None,
+    errors: dict[str, str] | None = None,
+    message: str | None = None,
+    warning: str | None = None,
+):
+    """`submitted` = the raw form values to show again after a validation error,
+    so nothing typed is lost."""
+    groups: dict[str, list[dict]] = {}
+    for row in runtime_settings.describe_all(db):
+        key = row.spec.key
+        shown = (
+            submitted[key]
+            if submitted is not None and key in submitted
+            else (runtime_settings.to_text(row.override) if row.override is not None else "")
+        )
+        groups.setdefault(row.spec.group, []).append(
+            {
+                "spec": row.spec,
+                "value": shown,
+                "overridden": row.override is not None,
+                "env_text": runtime_settings.to_text(row.env) if row.env is not None else None,
+                "default_text": runtime_settings.to_text(row.spec.default),
+                "error": (errors or {}).get(key),
+            }
+        )
+    return templates.TemplateResponse(
+        request,
+        "config.html",
+        {
+            "groups": groups,
+            "console_only": runtime_settings.CONSOLE_ONLY,
+            "message": message,
+            "warning": warning,
+            "has_errors": bool(errors),
+        },
+    )
+
+
+@router.get("/config")
+def config_form(
+    request: Request,
+    db: Session = Depends(get_db),
+    _admin: None = Depends(require_admin_session),
+):
+    return _render_config(request, db)
+
+
+@router.post("/config")
+async def config_submit(
+    request: Request,
+    db: Session = Depends(get_db),
+    _admin: None = Depends(require_admin_session),
+):
+    form = await request.form()
+    submitted = {
+        spec.key: str(form[f"s__{spec.key}"])
+        for spec in runtime_settings.SPECS
+        if f"s__{spec.key}" in form
+    }
+    changed, errors = runtime_settings.save_overrides(db, submitted)
+    if errors:
+        return _render_config(request, db, submitted=submitted, errors=errors)
+    if not changed:
+        return _render_config(request, db, message="Geen wijzigingen.")
+
+    scheduler_changed = [k for k in changed if runtime_settings.spec_for(k).owner == "scheduler"]
+    message = f"Opgeslagen ({len(changed)} wijziging{'en' if len(changed) != 1 else ''})."
+    warning = None
+    if scheduler_changed:
+        try:
+            httpx.post(f"{settings.scheduler_url}/trigger/sync-settings", timeout=5.0).raise_for_status()
+            message += " De scheduler heeft de wijzigingen direct overgenomen."
+        except httpx.HTTPError:
+            warning = (
+                "De scheduler is nu niet bereikbaar. Zijn wijzigingen worden binnen enkele minuten "
+                "vanzelf overgenomen."
+            )
+    return _render_config(request, db, message=message, warning=warning)
 
 
 def _handle_not_authenticated(request: Request, exc: NotAuthenticated) -> RedirectResponse:

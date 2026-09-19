@@ -1,6 +1,6 @@
 """Minimal internal HTTP server so the admin GUI's "verstuur nu" button can
-kick off an immediate daily_digest run, and so main.py can be told to
-re-read digest settings without waiting for the next 5-minute sync tick.
+kick off an immediate digest, and so the scheduler can be told to re-read the
+settings changed in the GUI without waiting for the next sync tick.
 
 Deliberately stdlib-only (no FastAPI/uvicorn) to keep the scheduler's
 dependency footprint minimal, matching config.py's own reasoning. Only meant
@@ -24,6 +24,7 @@ class _Handler(BaseHTTPRequestHandler):
         routes = {
             "/trigger/daily-digest": self.server.daily_digest_run,  # type: ignore[attr-defined]
             "/trigger/digest-now": self.server.digest_now_run,  # type: ignore[attr-defined]
+            "/trigger/sync-settings": self.server.sync_settings_run,  # type: ignore[attr-defined]
         }
         target = routes.get(self.path)
         if target is None:
@@ -49,17 +50,20 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def start(port: int, daily_digest_run, digest_now_run=None) -> ThreadingHTTPServer:
+def start(port: int, daily_digest_run, digest_now_run=None, sync_settings_run=None) -> ThreadingHTTPServer:
     """Starts the trigger server on a background thread and returns it
     (caller keeps a reference so it isn't garbage-collected).
 
-    daily_digest_run: full run (fetch feeds, score new entries, mail).
-    digest_now_run: immediate mail of the best already-scored items, no
-    scoring — what the admin GUI's "verstuur nu" button uses.
+    daily_digest_run: the scheduled digest (mail the best not-yet-mailed items).
+    digest_now_run: immediate preview mail of the best already-scored items —
+    what the admin GUI's "verstuur nu" button uses.
+    sync_settings_run: re-read the settings changed in the admin GUI now,
+    instead of at the next sync tick (called after saving /admin/config).
     """
     server = ThreadingHTTPServer(("0.0.0.0", port), _Handler)  # noqa: S104 - internal network only, see module docstring
     server.daily_digest_run = daily_digest_run  # type: ignore[attr-defined]
     server.digest_now_run = digest_now_run  # type: ignore[attr-defined]
+    server.sync_settings_run = sync_settings_run  # type: ignore[attr-defined]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     logger.info("Trigger-server luistert intern op poort %d", port)

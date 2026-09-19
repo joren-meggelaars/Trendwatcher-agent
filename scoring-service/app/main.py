@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session, load_only
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import admin, classification, digest_settings, discovery, migrations, models, schemas
+from app import admin, classification, digest_settings, discovery, migrations, models, runtime_settings, schemas
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.embeddings import EmbeddingProvider, get_embedding_provider
@@ -180,6 +180,23 @@ def top_items(
         )
         for item in items
     ]
+
+
+@app.get("/settings/runtime", response_model=schemas.RuntimeOverridesResponse)
+def get_runtime_overrides(db: Session = Depends(get_db)) -> schemas.RuntimeOverridesResponse:
+    """What the scheduler polls: the values an admin overrode in /admin/config
+    for the scheduler's settings. Only registry keys, never secrets."""
+    return schemas.RuntimeOverridesResponse(overrides=runtime_settings.overrides_for_scheduler(db))
+
+
+@app.post("/settings/runtime/env", response_model=schemas.RuntimeEnvReportResponse)
+def report_runtime_env(
+    payload: schemas.RuntimeEnvReport,
+    db: Session = Depends(get_db),
+) -> schemas.RuntimeEnvReportResponse:
+    """The scheduler reports its .env values, for display only. This can never
+    change what the scheduler does — overrides are only set in the admin GUI."""
+    return schemas.RuntimeEnvReportResponse(stored=runtime_settings.store_env_baseline(db, payload.values))
 
 
 @app.post("/items/mark-digested", response_model=schemas.MarkDigestedResponse)

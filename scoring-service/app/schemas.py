@@ -54,6 +54,23 @@ class RecentFeedbackItem(BaseModel):
     summary: str | None
 
 
+class RuntimeOverridesResponse(BaseModel):
+    """GUI overrides of the scheduler's settings, typed (int/float/bool/str)."""
+
+    overrides: dict[str, int | float | bool | str]
+
+
+class RuntimeEnvReport(BaseModel):
+    """The .env values the scheduler is running with (as text), so the admin
+    GUI can show what is really in effect. Unknown keys are ignored."""
+
+    values: dict[str, str] = Field(max_length=100)
+
+
+class RuntimeEnvReportResponse(BaseModel):
+    stored: int
+
+
 class MarkDigestedRequest(BaseModel):
     item_ids: list[int] = Field(min_length=1, max_length=200)
 
