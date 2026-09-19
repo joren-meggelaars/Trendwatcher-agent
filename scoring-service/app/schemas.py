@@ -6,6 +6,19 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.classification import ItemCategory
 
 SourceStatus = Literal["kandidaat", "actief", "gedeactiveerd"]
+# What a source is for (not to be confused with an *item's* markt/nieuws
+# category). vuln_advisory is secondary to the market focus, but the Source
+# model has no weight/priority field, so that is not encoded beyond the label.
+SourceCategory = Literal[
+    "market_ma",
+    "market_analysis",
+    "vendor_product",
+    "microsoft_product",
+    "standards_protocols",
+    "threat_research",
+    "news",
+    "vuln_advisory",
+]
 DiscoveryMethod = Literal["seed", "link_following", "market_sweep", "manual", "mailbox"]
 FeedbackLabel = Literal["interessant", "niet_interessant"]
 
@@ -54,6 +67,7 @@ class SourceCreate(BaseModel):
     url: str
     type: str
     discovery_method: DiscoveryMethod = "manual"
+    category: SourceCategory | None = None
 
 
 class SourceResponse(BaseModel):
@@ -64,6 +78,8 @@ class SourceResponse(BaseModel):
     type: str
     status: SourceStatus
     discovery_method: DiscoveryMethod
+    category: SourceCategory | None
+    notes: str | None
     running_avg_score: float | None
     created_at: datetime
 

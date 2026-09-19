@@ -94,6 +94,7 @@ services:
       # this back to the config.py default of 0 without checking that limit
       # no longer applies (e.g. a paid Voyage plan).
       SCORE_REQUEST_DELAY_SECONDS: ${SCORE_REQUEST_DELAY_SECONDS:-0}
+      MAX_NEW_ENTRIES_PER_SOURCE: ${MAX_NEW_ENTRIES_PER_SOURCE:-10}
       DISCOVERY_DAY: ${DISCOVERY_DAY:-mon}
       DISCOVERY_HOUR: ${DISCOVERY_HOUR:-8}
       DISCOVERY_LOOKBACK_DAYS: ${DISCOVERY_LOOKBACK_DAYS:-30}

@@ -1,9 +1,10 @@
 import re
+from typing import get_args
 from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
-from app import models
+from app import models, schemas
 from app.config import settings
 
 # Matches plain http(s) URLs whether they sit inside an HTML href="..." attribute
@@ -12,21 +13,84 @@ from app.config import settings
 _URL_RE = re.compile(r'https?://[^\s"\'<>]+')
 
 
-def create_source(db: Session, url: str, type_: str, discovery_method: str = "manual") -> models.Source | None:
-    """Shared implementation behind POST /sources and the admin sources form.
+_STATUSES = get_args(schemas.SourceStatus)
+_CATEGORIES = get_args(schemas.SourceCategory)
+
+
+def create_source(
+    db: Session,
+    url: str,
+    type_: str,
+    discovery_method: str = "manual",
+    *,
+    category: str | None = None,
+    notes: str | None = None,
+    status: str = "kandidaat",
+) -> models.Source | None:
+    """Shared implementation behind POST /sources, the admin sources form and
+    the seed script.
 
     Returns None if a Source with this url already exists — callers decide
     how to surface that (409 for the JSON API, a no-op redirect for the GUI).
+    `status` defaults to "kandidaat" (the normal instroom path); only the seed
+    script passes anything else, for sources whose feed it has verified itself.
     """
+    if status not in _STATUSES:
+        raise ValueError(f"Unknown source status {status!r}")
+    if category is not None and category not in _CATEGORIES:
+        raise ValueError(f"Unknown source category {category!r}")
+
     existing = db.query(models.Source).filter(models.Source.url == url).first()
     if existing is not None:
         return None
 
-    source = models.Source(url=url, type=type_, status="kandidaat", discovery_method=discovery_method)
+    source = models.Source(
+        url=url,
+        type=type_,
+        status=status,
+        discovery_method=discovery_method,
+        category=category,
+        notes=notes,
+    )
     db.add(source)
     db.commit()
     db.refresh(source)
     return source
+
+
+def upsert_seed_source(
+    db: Session,
+    url: str,
+    type_: str,
+    *,
+    category: str | None = None,
+    status: str = "kandidaat",
+    notes: str | None = None,
+    discovery_method: str = "seed",
+) -> tuple[models.Source, str]:
+    """Idempotent seed step, keyed on the feed url. Returns (source, outcome):
+
+    - "created":      the url was new; created with the given status/category/notes.
+    - "category_set": the url exists without a category and one was given; only
+                      that empty category is filled in.
+    - "unchanged":    the url exists; nothing was touched.
+
+    An existing source's status, type and notes are never changed — whatever
+    an admin or the instroom/krimp logic decided since seeding wins.
+    """
+    source = create_source(
+        db, url, type_, discovery_method, category=category, notes=notes, status=status
+    )
+    if source is not None:
+        return source, "created"
+
+    existing = db.query(models.Source).filter(models.Source.url == url).one()
+    if existing.category is None and category is not None:
+        existing.category = category
+        db.commit()
+        db.refresh(existing)
+        return existing, "category_set"
+    return existing, "unchanged"
 
 
 def extract_links(raw_content: str) -> list[str]:

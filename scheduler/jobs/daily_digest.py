@@ -44,22 +44,47 @@ def fetch_active_sources(client: httpx.Client) -> list[dict]:
 
 
 def fetch_new_entries(source: dict, seen: SeenItemsCache) -> list[dict]:
+    """Unseen entries of one feed, at most MAX_NEW_ENTRIES_PER_SOURCE of them.
+
+    A source that is new to the seen-cache would otherwise have its whole feed
+    (hundreds of entries for some) scored in one run — hours at the Voyage
+    free-tier rate — and the digest is only sent after that. So only the
+    newest N are kept; the older unseen ones are marked as seen without being
+    scored, so that backlog is not re-attempted every day. 0 = no limit.
+    """
     parsed = feedparser.parse(source["url"])
     source_name = parsed.feed.get("title") or source["url"]
-    new_entries = []
+    new_entries = []  # (published, entry)
     for entry in parsed.entries:
         link = entry.get("link", "")
         if not link or seen.has_seen(source["id"], link):
             continue
+        published = entry.get("published_parsed") or entry.get("updated_parsed")
         new_entries.append(
-            {
-                "title": entry.get("title") or "(geen titel)",
-                "link": link,
-                "raw_content": entry.get("summary") or entry.get("title") or "",
-                "source_name": source_name,
-            }
+            (
+                tuple(published) if published else (),
+                {
+                    "title": entry.get("title") or "(geen titel)",
+                    "link": link,
+                    "raw_content": entry.get("summary") or entry.get("title") or "",
+                    "source_name": source_name,
+                },
+            )
         )
-    return new_entries
+
+    limit = config.MAX_NEW_ENTRIES_PER_SOURCE
+    if limit and len(new_entries) > limit:
+        # Newest first; entries without a date keep their feed order, after the dated ones.
+        new_entries.sort(key=lambda pair: pair[0], reverse=True)
+        for _published, skipped in new_entries[limit:]:
+            seen.mark_seen(source["id"], skipped["link"])
+        logger.info(
+            "%s: %d ongeziene items, alleen de nieuwste %d worden gescoord (MAX_NEW_ENTRIES_PER_SOURCE); "
+            "de %d oudere zijn als gezien gemarkeerd.",
+            source["url"], len(new_entries), limit, len(new_entries) - limit,
+        )
+        new_entries = new_entries[:limit]
+    return [entry for _published, entry in new_entries]
 
 
 def score_entry(client: httpx.Client, entry: dict, source: dict) -> dict:

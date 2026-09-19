@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session, load_only
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import admin, classification, digest_settings, discovery, models, schemas
+from app import admin, classification, digest_settings, discovery, migrations, models, schemas
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.embeddings import EmbeddingProvider, get_embedding_provider
@@ -15,8 +15,10 @@ from app.scoring import score_and_store
 app = FastAPI(title="Security Trendwatch Agent — Scoring Service")
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret_key)
 
-# Idempotent: create_all only creates tables that don't exist yet.
+# Idempotent: create_all only creates tables that don't exist yet, and
+# add_missing_columns then adds columns introduced after a table was created.
 Base.metadata.create_all(bind=engine)
+migrations.add_missing_columns(engine)
 
 admin.register(app)
 
@@ -179,7 +181,9 @@ def create_source(
     payload: schemas.SourceCreate,
     db: Session = Depends(get_db),
 ) -> models.Source:
-    source = discovery.create_source(db, payload.url, payload.type, payload.discovery_method)
+    source = discovery.create_source(
+        db, payload.url, payload.type, payload.discovery_method, category=payload.category
+    )
     if source is None:
         raise HTTPException(status_code=409, detail=f"Source with url {payload.url!r} already exists")
     return source

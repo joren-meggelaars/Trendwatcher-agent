@@ -126,6 +126,12 @@ in een lokaal JSON-bestand (`SEEN_ITEMS_PATH`, standaard
 `data/seen_items.json`). Dit voorkomt dat dezelfde feed-items elke dag
 opnieuw gescoord worden. Geen externe state nodig voor Fase 1.
 
+Per bron worden per run maximaal `MAX_NEW_ENTRIES_PER_SOURCE` (standaard 10,
+0 = onbeperkt) van de **nieuwste** ongeziene items gescoord. Een nieuwe bron met
+een grote feed (NCSC: honderden items, IETF: ~600) zou anders de hele run — en
+dus de digest — uren blokkeren; de oudere ongeziene items worden als gezien
+gemarkeerd in plaats van gescoord.
+
 ## Tests
 
 ```bash

@@ -55,6 +55,11 @@ class Source(Base):
     type: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="kandidaat", index=True)
     discovery_method: Mapped[str] = mapped_column(String)
+    # Both nullable and added after the table existed: see app/migrations.py.
+    # category is one of schemas.SourceCategory; notes is free text, e.g. why a
+    # source was seeded as "gedeactiveerd".
+    category: Mapped[str | None] = mapped_column(String, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     running_avg_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 

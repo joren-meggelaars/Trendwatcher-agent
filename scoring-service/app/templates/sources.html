@@ -22,13 +22,17 @@
 
 <table>
 <tr>
-  <th>ID</th><th>URL</th><th>Type</th><th>Status</th><th>Gem. score</th><th>Items</th><th>Ontdekt via</th><th>Actie</th>
+  <th>ID</th><th>URL</th><th>Type</th><th>Categorie</th><th>Status</th><th>Gem. score</th><th>Items</th><th>Ontdekt via</th><th>Actie</th>
 </tr>
 {% for source in sources %}
 <tr>
   <td>{{ source.id }}</td>
-  <td><a href="{{ source.url }}" target="_blank" rel="noopener">{{ source.url }}</a></td>
+  <td>
+    <a href="{{ source.url }}" target="_blank" rel="noopener">{{ source.url }}</a>
+    {% if source.notes %}<br><small style="color:#666">{{ source.notes }}</small>{% endif %}
+  </td>
   <td>{{ source.type }}</td>
+  <td>{{ source.category or "—" }}</td>
   <td><span class="status status-{{ source.status }}">{{ source.status }}</span></td>
   <td>{{ "%.2f"|format(source.running_avg_score) if source.running_avg_score is not none else "—" }}</td>
   <td>{{ item_counts.get(source.id, 0) }}</td>
@@ -46,7 +50,7 @@
   </td>
 </tr>
 {% else %}
-<tr><td colspan="8">Geen bronnen gevonden.</td></tr>
+<tr><td colspan="9">Geen bronnen gevonden.</td></tr>
 {% endfor %}
 </table>
 {% endblock %}

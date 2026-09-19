@@ -73,9 +73,28 @@ Eenmalig, direct na de eerste start — de Postgres-database begint leeg
 docker compose run --rm scoring-service python -m scripts.seed_sources
 ```
 
-Voegt een vaste lijst RSS-bronnen toe met status `"kandidaat"` (zie
-`scripts/seed_sources.py`). Idempotent — opnieuw draaien slaat bronnen over
-die al bestaan, dus geen probleem bij een herhaalde deployment.
+Voegt de vaste bronnenlijst toe (zie `scripts/seed_sources.py`), met per bron
+een categorie en een status:
+
+- de oorspronkelijke 20 bronnen als `"kandidaat"`;
+- bronnen waarvan de feed is gevalideerd (HTTP 200, parseerbaar, ≥1 item) als
+  `"actief"` — die pakt de scheduler meteen op;
+- bronnen zonder werkende feed als `"gedeactiveerd"`, met de reden in de
+  notitie (zichtbaar in `/admin/sources`).
+
+Idempotent, sleutel is de feed-URL. Een bron die al bestaat blijft zoals hij
+is: status, type en notities worden **nooit** aangepast; alleen een nog lege
+categorie wordt ingevuld. De uitvoer vermeldt precies wat is toegevoegd en wat
+is aangeraakt. Ook op een bestaande database (bijv. de VM, waar de tabel
+`sources` de kolommen `category` en `notes` nog niet heeft) is het script — en
+de scoring-service bij het opstarten — veilig: ontbrekende nullable kolommen
+worden automatisch toegevoegd (`app/migrations.py`, SQLite en PostgreSQL).
+
+**Let op na het seeden van nieuwe actieve bronnen:** de eerste run scoort per
+bron maximaal `MAX_NEW_ENTRIES_PER_SOURCE` (standaard 10) van de nieuwste
+items, en markeert de oudere achterstand als gezien. Bij de Voyage-gratis-tier
+(`SCORE_REQUEST_DELAY_SECONDS=21`) is dat voor ~25 nieuwe bronnen nog altijd
+ruim een uur; de digest wordt pas na die run verstuurd.
 
 ## 6. Controleren dat alles draait
 

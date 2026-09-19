@@ -47,6 +47,12 @@ DIGEST_TOP_N = int(os.environ.get("DIGEST_TOP_N", "5"))
 # for every setup.
 SCORE_REQUEST_DELAY_SECONDS = float(os.environ.get("SCORE_REQUEST_DELAY_SECONDS", "0"))
 
+# Per source and per daily_digest run, score at most this many of the newest
+# unseen feed entries (0 = no limit). Protects against a newly added source
+# with a big feed (NCSC: hundreds, IETF: ~600 entries) blocking the run — and
+# thus the digest — for hours; older unseen entries are marked seen, not scored.
+MAX_NEW_ENTRIES_PER_SOURCE = int(os.environ.get("MAX_NEW_ENTRIES_PER_SOURCE", "10"))
+
 # APScheduler day-of-week name, e.g. "mon", "tue", ... "sun".
 DISCOVERY_DAY = os.environ.get("DISCOVERY_DAY", "mon")
 DISCOVERY_HOUR = int(os.environ.get("DISCOVERY_HOUR", "8"))
