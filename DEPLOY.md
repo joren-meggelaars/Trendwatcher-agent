@@ -194,6 +194,63 @@ location / {
 Zonder `FEEDBACK_BASE_URL` gebruiken de mailknoppen `http://<BIND_ADDRESS>:8000`,
 dus alleen bruikbaar in je eigen netwerk.
 
+## Via Tailscale
+
+Tailscale draait al op de VM (`srv-doc-01`, ook voor de Grocery-agent). De GUI
+kan daar met Tailscale Serve bij: HTTPS met een echt certificaat, alleen
+bereikbaar voor apparaten in je tailnet, zonder iets naar het internet te
+openen. Dat kan naast de NPM-route (`https://ta.krijgfeestelijkdetering.nl`)
+bestaan, of die vervangen.
+
+Vooraf, eenmalig in de Tailscale-adminconsole: MagicDNS en HTTPS-certificaten
+staan aan (de Grocery-agent gebruikt dat al, dus dat is in orde). Je telefoon en
+pc hebben de Tailscale-app nodig en mogen de VM bereiken (ACL).
+
+1. **Nieuwe versie uitrollen.** De `web`-container publiceert nu ook
+   `127.0.0.1:8002` (alleen de VM zelf kan daar bij):
+   ```bash
+   git pull && docker compose up -d
+   curl -s http://127.0.0.1:8002/health        # {"status":"ok"}
+   ```
+2. **Serve aanzetten** op de VM. Kijk eerst wat er al staat en overschrijf dat niet:
+   ```bash
+   tailscale serve status                      # de Grocery-agent staat op :8443
+   sudo tailscale serve --bg --https=443 http://127.0.0.1:8002
+   tailscale serve status
+   ```
+   Is poort 443 al bezet, neem dan `--https=10000`. Uitzetten:
+   `sudo tailscale serve --https=443 off`. (De syntaxis verschilt per versie;
+   zie `tailscale serve --help`.)
+3. **Openen:** `https://srv-doc-01.tail268074.ts.net/` (met `:10000` erachter
+   als je die poort nam) en inloggen met je gewone account.
+4. **Mailknoppen.** `FEEDBACK_BASE_URL` in `.env` is één adres. Kies:
+   - blijft `https://ta.krijgfeestelijkdetering.nl`: de knoppen werken overal,
+     ook zonder Tailscale;
+   - wordt het tailnet-adres (zonder slash): de knoppen werken alleen op
+     apparaten met Tailscale aan (dat geldt ook voor je werk-pc, als daar geen
+     Tailscale op staat).
+
+   Daarna `docker compose up -d`. Laat `SESSION_COOKIE_SECURE=true` staan: beide
+   adressen zijn https. Inloggen werkt per adres apart (een cookie hoort bij één
+   adres).
+5. **Internet dicht?** Wil je de GUI niet meer publiek, verwijder dan de
+   Proxy Host in NPM (en zet `FEEDBACK_BASE_URL` op het tailnet-adres).
+
+Goed om te weten:
+
+- De cross-site-controle vergelijkt `Origin` met de `Host`-header. Serve laat die
+  ongemoeid (dat is bij de Grocery-agent gecontroleerd), dus formulieren werken
+  zonder verdere instelling.
+- De rem op verkeerde wachtwoorden (5 per adres) telt per adres uit
+  `X-Forwarded-For`. Stuurt Serve dat niet mee, dan delen alle tailnet-bezoekers
+  één teller (de Docker-gateway). Dat is veilig, alleen wordt iedereen samen
+  15 minuten geblokkeerd na 5 foute pogingen. Controleer dit na de eerste
+  keer inloggen met `docker compose logs web`.
+- De server haalt zelf nooit iets op uit je tailnet: `100.64.0.0/10` (de
+  Tailscale-adressen) en dus ook `*.ts.net` valt onder "intern" in
+  "Veilig ophalen van bronnen".
+- Alleen `web` is bereikbaar; de API (`scoring-service`) blijft intern.
+
 ## Veilig ophalen van bronnen
 
 Alles wat het systeem van internet haalt gaat via één functie (`safe_fetch.py`,

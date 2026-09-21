@@ -107,6 +107,9 @@ services:
       # every interface on the box — set BIND_ADDRESS in .env to that
       # interface's IP. The reverse proxy (HTTPS, access from outside) points here.
       - "${BIND_ADDRESS}:8000:8000"
+      # Loopback only: the target of `tailscale serve` on the VM (see DEPLOY.md,
+      # "Via Tailscale"). Nothing outside the VM can reach this one directly.
+      - "127.0.0.1:8002:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
