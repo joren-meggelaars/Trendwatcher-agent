@@ -232,6 +232,24 @@ def test_static_files_are_served_and_cannot_escape_their_folder(client):
     assert client.get("/static/%2e%2e/config.py").status_code == 404
 
 
+def test_pwa_manifest_and_icons_are_public_and_linked_from_every_page(client):
+    manifest = client.get("/static/manifest.json")
+    assert manifest.status_code == 200 and "json" in manifest.headers["content-type"]
+    body = manifest.json()
+    assert body["name"] == "Security Trendwatch" and body["start_url"] == "/admin"
+    assert {i["purpose"] for i in body["icons"]} == {"any", "maskable"}
+
+    for path in ("/static/icon-192.png", "/static/icon-512.png",
+                 "/static/icon-maskable-192.png", "/static/icon-maskable-512.png", "/static/apple-touch-icon.png"):
+        resp = client.get(path)
+        assert resp.status_code == 200 and resp.headers["content-type"] == "image/png", path
+
+    login_page = client.get("/admin/login").text
+    assert 'rel="manifest" href="/static/manifest.json"' in login_page
+    assert 'rel="apple-touch-icon" href="/static/apple-touch-icon.png"' in login_page
+    assert 'name="theme-color" content="#4f46e5"' in login_page
+
+
 # --- the public app: the GUI and nothing else ----------------------------------------------------------
 
 
