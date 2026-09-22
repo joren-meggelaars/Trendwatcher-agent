@@ -127,22 +127,27 @@ def test_settings_page_shows_current_values(admin_client):
     assert resp.status_code == 200
     assert 'value="7"' in resp.text  # default digest_hour
     assert 'value="5"' in resp.text  # default digest_top_n
+    # default digest_days (mon-fri) checked, weekend not
+    for code in ("mon", "tue", "wed", "thu", "fri"):
+        assert f'value="{code}" checked' in resp.text
+    assert 'value="sat" checked' not in resp.text and 'value="sun" checked' not in resp.text
 
 
 def test_settings_update_persists_and_clamps_out_of_range_values(admin_client):
     resp = admin_client.post(
         "/admin/settings",
-        data={"digest_hour": "9", "digest_top_n": "8"},
+        data={"digest_hour": "9", "digest_top_n": "8", "days": ["mon", "wed", "fri"]},
     )
     assert resp.status_code == 200
     assert "Instellingen opgeslagen" in resp.text
     assert 'value="9"' in resp.text
     assert 'value="8"' in resp.text
+    assert 'value="mon" checked' in resp.text and 'value="tue" checked' not in resp.text
 
     # Out-of-range values get clamped, not rejected with a 500/422.
     resp = admin_client.post(
         "/admin/settings",
-        data={"digest_hour": "99", "digest_top_n": "0"},
+        data={"digest_hour": "99", "digest_top_n": "0", "days": ["mon", "wed", "fri"]},
     )
     assert resp.status_code == 200
     assert 'value="23"' in resp.text  # clamped to max
@@ -151,6 +156,19 @@ def test_settings_update_persists_and_clamps_out_of_range_values(admin_client):
     check_resp = admin_client.get("/settings/digest")
     assert check_resp.json()["digest_hour"] == 23
     assert check_resp.json()["digest_top_n"] == 1
+    assert check_resp.json()["digest_days"] == "mon,wed,fri"
+
+
+def test_settings_update_with_no_days_ticked_shows_an_error_and_keeps_the_old_value(admin_client):
+    admin_client.post("/admin/settings", data={"digest_hour": "9", "digest_top_n": "8", "days": ["sat"]})
+
+    resp = admin_client.post("/admin/settings", data={"digest_hour": "10", "digest_top_n": "8", "days": []})
+    assert resp.status_code == 200
+    assert "Kies minstens één dag" in resp.text
+
+    check_resp = admin_client.get("/settings/digest").json()
+    assert check_resp["digest_days"] == "sat"   # unchanged
+    assert check_resp["digest_hour"] == 9        # the whole save was rejected, not just the days
 
 
 def test_send_now_relays_to_scheduler_and_reports_success(admin_client, monkeypatch):

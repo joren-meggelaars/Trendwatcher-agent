@@ -340,4 +340,4 @@ def update_digest_settings_endpoint(
     payload: schemas.DigestSettingsUpdate,
     db: Session = Depends(get_db),
 ) -> models.DigestSettings:
-    return digest_settings.update_digest_settings(db, payload.digest_hour, payload.digest_top_n)
+    return digest_settings.update_digest_settings(db, payload.digest_hour, payload.digest_top_n, payload.digest_days)

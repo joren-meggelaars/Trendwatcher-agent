@@ -24,6 +24,16 @@
       <label for="digest_top_n">Aantal items per categorie (marktontwikkeling en nieuws elk)</label>
       <input id="digest_top_n" type="number" name="digest_top_n" min="1" max="50" value="{{ settings.digest_top_n }}" size="6">
     </div>
+    <div class="field">
+      <label>Dagen waarop de digest wordt verstuurd</label>
+      <div class="form-row">
+        {% set day_labels = [('mon','ma'), ('tue','di'), ('wed','wo'), ('thu','do'), ('fri','vr'), ('sat','za'), ('sun','zo')] %}
+        {% set active_days = settings.digest_days.split(',') %}
+        {% for code, label in day_labels %}
+        <label class="checkline"><input type="checkbox" name="days" value="{{ code }}" {{ 'checked' if code in active_days }}> {{ label }}</label>
+        {% endfor %}
+      </div>
+    </div>
     <button type="submit" class="btn btn-primary">Opslaan</button>
   </form>
   <p class="hint mt-1">

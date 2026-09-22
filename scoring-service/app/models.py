@@ -101,6 +101,11 @@ class DigestSettings(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     digest_hour: Mapped[int] = mapped_column(Integer, default=7)
     digest_top_n: Mapped[int] = mapped_column(Integer, default=5)
+    # Comma-separated APScheduler day-of-week abbreviations, e.g. "mon,tue,wed,thu,fri". Nullable and
+    # added after the table existed (like digested_at above): see app/migrations.py. NULL means "not
+    # set yet" for a row from before this column existed; app/digest_settings.py fills in the default
+    # the first time such a row is read.
+    digest_days: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 

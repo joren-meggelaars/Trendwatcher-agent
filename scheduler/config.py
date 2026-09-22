@@ -39,6 +39,9 @@ DIGEST_DRY_RUN = os.environ.get("DIGEST_DRY_RUN", "true").strip().lower() not in
 
 DIGEST_HOUR = int(os.environ.get("DIGEST_HOUR", "7"))
 DIGEST_TOP_N = int(os.environ.get("DIGEST_TOP_N", "5"))
+# APScheduler day-of-week list, e.g. "mon,tue,wed,thu,fri" (comma-separated, no ranges — kept in sync
+# with app/digest_settings.py's canonical format on the scoring-service side).
+DIGEST_DAYS = os.environ.get("DIGEST_DAYS", "mon,tue,wed,thu,fri")
 
 # Minimum spacing between POST /score calls, in seconds, shared by all jobs
 # that score (see rate_limit.py). Default 0 (no delay); 21 for Voyage's

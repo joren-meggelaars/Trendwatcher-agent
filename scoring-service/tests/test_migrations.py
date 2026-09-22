@@ -52,6 +52,37 @@ def test_leaves_missing_tables_to_create_all(tmp_path):
     assert inspect(engine).get_table_names() == []
 
 
+def _old_digest_settings_engine(tmp_path):
+    """digest_settings as it looked before digest_days existed (see app/digest_settings.py)."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'old_digest.db'}")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE digest_settings ("
+                "id INTEGER PRIMARY KEY, digest_hour INTEGER, digest_top_n INTEGER, updated_at DATETIME)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO digest_settings (id, digest_hour, digest_top_n, updated_at) "
+                "VALUES (1, 9, 8, '2026-01-01 00:00:00')"
+            )
+        )
+    return engine
+
+
+def test_adds_digest_days_to_an_existing_digest_settings_row(tmp_path):
+    engine = _old_digest_settings_engine(tmp_path)
+
+    added = migrations.add_missing_columns(engine)
+
+    assert "digest_settings.digest_days" in added
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT digest_hour, digest_top_n, digest_days FROM digest_settings")).one()
+    # existing row keeps its hour/top_n; digest_days is NULL until get_digest_settings() backfills the default
+    assert tuple(row) == (9, 8, None)
+
+
 def test_refuses_to_guess_for_a_missing_not_null_column(tmp_path, monkeypatch):
     from sqlalchemy import Column, MetaData, String, Table
 

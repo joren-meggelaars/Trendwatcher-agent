@@ -1,4 +1,4 @@
-"""Fetches digest settings (hour, top-N) from the scoring-service's
+"""Fetches digest settings (hour, top-N, days) from the scoring-service's
 GET /settings/digest — the admin GUI writes there, this reads it, so an
 admin-GUI change takes effect without editing .env or restarting anything.
 
@@ -23,7 +23,7 @@ def fetch_digest_settings() -> dict:
         return resp.json()
     except httpx.HTTPError:
         logger.warning(
-            "Kon /settings/digest niet ophalen, val terug op DIGEST_HOUR=%d / DIGEST_TOP_N=%d uit config.",
-            config.DIGEST_HOUR, config.DIGEST_TOP_N,
+            "Kon /settings/digest niet ophalen, val terug op DIGEST_HOUR=%d / DIGEST_TOP_N=%d / DIGEST_DAYS=%s uit config.",
+            config.DIGEST_HOUR, config.DIGEST_TOP_N, config.DIGEST_DAYS,
         )
-        return {"digest_hour": config.DIGEST_HOUR, "digest_top_n": config.DIGEST_TOP_N}
+        return {"digest_hour": config.DIGEST_HOUR, "digest_top_n": config.DIGEST_TOP_N, "digest_days": config.DIGEST_DAYS}

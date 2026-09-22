@@ -438,12 +438,22 @@ def settings_submit(
     request: Request,
     digest_hour: int = Form(...),
     digest_top_n: int = Form(...),
+    days: list[str] = Form(default=[]),
     db: Session = Depends(get_db),
     _admin: None = Depends(require_admin_session),
 ):
     digest_hour = max(0, min(23, digest_hour))
     digest_top_n = max(1, min(50, digest_top_n))
-    current = digest_settings.update_digest_settings(db, digest_hour, digest_top_n)
+    try:
+        digest_days = digest_settings.normalize_digest_days(days)
+    except ValueError:
+        current = digest_settings.get_digest_settings(db)
+        return templates.TemplateResponse(
+            request,
+            "settings.html",
+            {"settings": current, "sent": None, "saved": False, "error": "Kies minstens één dag voor de digest."},
+        )
+    current = digest_settings.update_digest_settings(db, digest_hour, digest_top_n, digest_days)
     return templates.TemplateResponse(
         request,
         "settings.html",

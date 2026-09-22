@@ -17,10 +17,14 @@ class _FakeScheduler:
         self.rescheduled[job_id] = trigger
 
 
-def _sync(monkeypatch, changed, digest_hour=7):
+def _sync(monkeypatch, changed, digest_hour=7, digest_days="mon,tue,wed,thu,fri"):
     monkeypatch.setattr(main.runtime_settings, "sync", lambda: set(changed))
-    monkeypatch.setattr(main, "fetch_digest_settings", lambda: {"digest_hour": digest_hour, "digest_top_n": 5})
+    monkeypatch.setattr(
+        main, "fetch_digest_settings",
+        lambda: {"digest_hour": digest_hour, "digest_top_n": 5, "digest_days": digest_days},
+    )
     monkeypatch.setattr(main, "_current_digest_hour", 7)
+    monkeypatch.setattr(main, "_current_digest_days", "mon,tue,wed,thu,fri")
     scheduler = _FakeScheduler()
     main._sync_settings(scheduler)
     return scheduler
@@ -67,6 +71,23 @@ def test_a_changed_digest_hour_from_the_digest_page_still_reschedules_the_digest
 
     assert set(scheduler.rescheduled) == {"daily_digest"}
     assert main._current_digest_hour == 9
+    fields = {f.name: str(f) for f in scheduler.rescheduled["daily_digest"].fields}
+    assert fields["hour"] == "9" and fields["day_of_week"] == "mon,tue,wed,thu,fri"  # days unchanged
+
+
+def test_a_changed_digest_days_from_the_digest_page_reschedules_the_digest(monkeypatch):
+    scheduler = _sync(monkeypatch, set(), digest_days="mon,tue,wed,thu,fri,sat,sun")
+
+    assert set(scheduler.rescheduled) == {"daily_digest"}
+    assert main._current_digest_days == "mon,tue,wed,thu,fri,sat,sun"
+    fields = {f.name: str(f) for f in scheduler.rescheduled["daily_digest"].fields}
+    assert fields["day_of_week"] == "mon,tue,wed,thu,fri,sat,sun" and fields["hour"] == "7"  # hour unchanged
+
+
+def test_unchanged_digest_hour_and_days_do_not_reschedule(monkeypatch):
+    scheduler = _sync(monkeypatch, set())  # both defaults, matching _current_*
+
+    assert scheduler.rescheduled == {}
 
 
 def test_the_trigger_server_runs_the_sync_on_request():

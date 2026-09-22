@@ -36,3 +36,11 @@ def test_daily_digest_job_only_mails(monkeypatch):
 
     assert job.func is daily_digest.run
     assert not hasattr(daily_digest, "score_entry") and not hasattr(daily_digest, "fetch_new_entries")
+
+
+def test_daily_digest_job_defaults_to_weekdays_only(monkeypatch):
+    monkeypatch.setattr(config, "DIGEST_DAYS", "mon,tue,wed,thu,fri")
+    job = _scheduler(monkeypatch).get_job("daily_digest")
+
+    fields = {f.name: str(f) for f in job.trigger.fields}
+    assert fields["day_of_week"] == "mon,tue,wed,thu,fri"

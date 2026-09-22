@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.digest_settings import DEFAULT_DIGEST_DAYS, normalize_digest_days
 
 from app.classification import ItemCategory
 
@@ -139,9 +141,19 @@ class DigestSettingsResponse(BaseModel):
 
     digest_hour: int
     digest_top_n: int
+    digest_days: str
     updated_at: datetime
 
 
 class DigestSettingsUpdate(BaseModel):
     digest_hour: int = Field(ge=0, le=23)
     digest_top_n: int = Field(ge=1, le=50)
+    digest_days: str = Field(default=DEFAULT_DIGEST_DAYS)
+
+    @field_validator("digest_days")
+    @classmethod
+    def _valid_digest_days(cls, value: str) -> str:
+        try:
+            return normalize_digest_days(value.split(","))
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
