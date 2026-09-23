@@ -30,23 +30,51 @@
   var toastEl = document.getElementById("toast");
   var toastTimer = null;
 
+  /* An icon-only button for the toast (undo / close): <svg class="icon"><use href="#i-name"/></svg>,
+     built with the DOM API rather than innerHTML so nothing here ever parses a string as markup. */
+  function toastButton(iconId, label, className, onClick) {
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "toast-btn " + className;
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "icon");
+    var use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    use.setAttribute("href", "#" + iconId);
+    svg.appendChild(use);
+    button.appendChild(svg);
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
   window.TW = {
-    /* A short message at the bottom, optionally with one action (e.g. undo). */
+    /* A short message at the bottom, optionally with one action (e.g. undo).
+       Always has a close button; the action (if any) is a round-arrow icon
+       button next to it, not a text link. */
     toast: function (text, action) {
       if (!toastEl) return;
-      toastEl.textContent = text;
+      toastEl.textContent = "";
+
+      var textEl = document.createElement("span");
+      textEl.className = "toast-text";
+      textEl.textContent = text;
+      toastEl.appendChild(textEl);
+
+      var actions = document.createElement("span");
+      actions.className = "toast-actions";
       if (action) {
-        toastEl.appendChild(document.createTextNode(" "));
-        var link = document.createElement("a");
-        link.href = "#";
-        link.textContent = action.label;
-        link.addEventListener("click", function (event) {
-          event.preventDefault();
+        actions.appendChild(toastButton("i-undo", action.label, "toast-undo", function () {
           toastEl.hidden = true;
           action.run();
-        });
-        toastEl.appendChild(link);
+        }));
       }
+      actions.appendChild(toastButton("i-x", "Sluiten", "toast-close", function () {
+        toastEl.hidden = true;
+        window.clearTimeout(toastTimer);
+      }));
+      toastEl.appendChild(actions);
+
       toastEl.hidden = false;
       window.clearTimeout(toastTimer);
       toastTimer = window.setTimeout(function () { toastEl.hidden = true; }, action ? 9000 : 3500);

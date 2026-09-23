@@ -230,9 +230,15 @@ main > .container > table, main > .container > form > table { background: var(--
 .progress { height: 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.25); overflow: hidden; }
 .progress > span { display: block; height: 100%; background: #fff; border-radius: 999px; transition: width 0.25s; }
 
-.toast { position: fixed; left: 50%; bottom: 1.25rem; transform: translateX(-50%); z-index: 50; max-width: min(92vw, 34rem); display: flex; gap: 1rem;
-         align-items: center; background: #111827; color: #f8fafc; padding: 0.75rem 1.1rem; border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); }
-.toast a { color: #a5b4fc; font-weight: 600; white-space: nowrap; }
+.toast { position: fixed; left: 50%; bottom: 1.25rem; transform: translateX(-50%); z-index: 50; width: min(calc(100% - 2rem), 34rem);
+         display: flex; gap: 0.5rem; align-items: flex-start; background: #111827; color: #f8fafc; padding: 0.75rem 0.6rem 0.75rem 1.1rem;
+         border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); }
+.toast-text { flex: 1; min-width: 0; padding-top: 0.3rem; overflow-wrap: anywhere; }
+.toast-actions { display: flex; gap: 0.15rem; flex: none; }
+.toast-btn { background: none; border: 0; color: #cbd5e1; cursor: pointer; padding: 0.5rem; border-radius: 8px; display: grid; place-items: center; flex: none; }
+.toast-btn .icon { width: 1.05rem; height: 1.05rem; }
+.toast-btn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.toast-undo { color: #a5b4fc; }
 
 /* --- items to judge (digest + review pages) ---------------------------------- */
 
