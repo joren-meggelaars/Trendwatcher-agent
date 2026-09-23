@@ -75,6 +75,15 @@ def _sync_settings(scheduler: BlockingScheduler) -> None:
             _current_digest_hour, _current_digest_days = new_hour, new_days
 
 
+# A cron job that starts late (the VM was paused for a backup, the container was
+# busy or restarting) still runs if it is at most this late; APScheduler's default
+# is 1 second, after which the run is silently skipped ("was missed by") and, for
+# the digest, no mail arrives that day. Several late runs collapse into one
+# (coalesce), and the digest only mails what was not mailed yet, so a late run
+# never sends anything twice.
+_CRON_MISFIRE_GRACE_SECONDS = 6 * 3600
+
+
 def _add_jobs(scheduler: BlockingScheduler) -> None:
     # Scoring is the slow, rate-limited part, so it runs all day in the
     # background; the daily digest below only mails what is already scored.
@@ -93,18 +102,24 @@ def _add_jobs(scheduler: BlockingScheduler) -> None:
         CronTrigger(day_of_week=config.DIGEST_DAYS, hour=config.DIGEST_HOUR, minute=0),
         id="daily_digest",
         name="Dagelijkse digest",
+        misfire_grace_time=_CRON_MISFIRE_GRACE_SECONDS,
+        coalesce=True,
     )
     scheduler.add_job(
         weekly_discovery.run,
         _TRIGGERS["weekly_discovery"](),
         id="weekly_discovery",
         name="Wekelijkse discovery-sweep",
+        misfire_grace_time=_CRON_MISFIRE_GRACE_SECONDS,
+        coalesce=True,
     )
     scheduler.add_job(
         mailbox_ingest.run,
         _TRIGGERS["mailbox_ingest"](),
         id="mailbox_ingest",
         name="Mailbox-ingest (nieuwsbrieven)",
+        misfire_grace_time=_CRON_MISFIRE_GRACE_SECONDS,
+        coalesce=True,
     )
     scheduler.add_job(
         _sync_settings,

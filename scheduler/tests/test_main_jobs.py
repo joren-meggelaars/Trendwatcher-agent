@@ -44,3 +44,23 @@ def test_daily_digest_job_defaults_to_weekdays_only(monkeypatch):
 
     fields = {f.name: str(f) for f in job.trigger.fields}
     assert fields["day_of_week"] == "mon,tue,wed,thu,fri"
+
+
+def test_cron_jobs_still_run_when_they_start_hours_late_instead_of_being_skipped(monkeypatch):
+    """Regression: the digest was skipped because the scheduler woke 37 minutes after 07:00
+    (APScheduler's default grace is 1 second), so no mail arrived that day."""
+    scheduler = _scheduler(monkeypatch)
+
+    for job_id in ("daily_digest", "weekly_discovery", "mailbox_ingest"):
+        job = scheduler.get_job(job_id)
+        assert job.misfire_grace_time >= 3600, job_id
+        assert job.coalesce is True, job_id
+
+
+def test_a_rescheduled_digest_keeps_its_grace_time(monkeypatch):
+    from apscheduler.triggers.cron import CronTrigger
+
+    scheduler = _scheduler(monkeypatch)
+    scheduler.reschedule_job("daily_digest", trigger=CronTrigger(day_of_week="mon", hour=9, minute=0))
+
+    assert scheduler.get_job("daily_digest").misfire_grace_time == main._CRON_MISFIRE_GRACE_SECONDS
