@@ -5,6 +5,7 @@ stay pure JSON, untouched by this module).
 """
 
 import html
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -23,6 +24,7 @@ from app import (
     digest_view,
     discovery,
     models,
+    oidc,
     review,
     runtime_settings,
     safe_fetch,
@@ -44,6 +46,8 @@ from app.config import settings
 from app.database import get_db
 from app.embeddings import EmbeddingProvider, get_embedding_provider
 from app.scoring import score_and_store
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin")
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
@@ -127,9 +131,21 @@ def login_form(request: Request, next: str | None = None):
     if _logged_in(request):
         return RedirectResponse(url=destination, status_code=303)
     # `next` is where the login was needed (e.g. a 👍 link from the mail): back there afterwards.
-    return templates.TemplateResponse(
-        request, "login.html", {"error": None, "next": destination if next else "", "remember_days": REMEMBER_DAYS}
-    )
+    return _login_page(request, next=destination if next else "")
+
+
+def _login_page(request: Request, error: str | None = None, next: str = "", status_code: int = 200, **extra):
+    """The login page. With Authentik configured the password form is folded
+    away as the emergency way in; `open_password` unfolds it (after a wrong
+    password, or when Authentik failed)."""
+    context = {
+        "error": error,
+        "next": next,
+        "remember_days": REMEMBER_DAYS,
+        "oidc_enabled": oidc.enabled(),
+        "open_password": error is not None,
+    }
+    return templates.TemplateResponse(request, "login.html", context, status_code=status_code, **extra)
 
 
 @router.post("/login")
@@ -141,16 +157,16 @@ def login_submit(
     next: str | None = Form(None),
 ):
     key = security.client_ip(request)
-    context = {"next": safe_next(next) if next else "", "remember_days": REMEMBER_DAYS}
+    back_to = safe_next(next) if next else ""
 
     locked = security.login_throttle.seconds_locked(key)
     if locked:  # no password check at all while locked: neither guessing nor CPU burning
         minutes = (locked + 59) // 60
-        return templates.TemplateResponse(
+        return _login_page(
             request,
-            "login.html",
-            {**context, "error": f"Te veel mislukte pogingen. Probeer het over {minutes} minu{'ut' if minutes == 1 else 'ten'} opnieuw."},
-            status_code=429,
+            f"Te veel mislukte pogingen. Probeer het over {minutes} minu{'ut' if minutes == 1 else 'ten'} opnieuw.",
+            back_to,
+            429,
             headers={"Retry-After": str(locked)},
         )
 
@@ -160,12 +176,43 @@ def login_submit(
         return RedirectResponse(url=safe_next(next), status_code=303)
 
     security.login_throttle.record_failure(key)
-    return templates.TemplateResponse(
-        request,
-        "login.html",
-        {**context, "error": "Ongeldige gebruikersnaam of wachtwoord."},
-        status_code=401,
-    )
+    return _login_page(request, "Ongeldige gebruikersnaam of wachtwoord.", back_to, 401)
+
+
+@router.get("/oidc/start")
+def oidc_start(request: Request, next: str | None = None):
+    """The "Inloggen met je account" button: off to Authentik, back on /oidc/callback."""
+    if not oidc.enabled():
+        return RedirectResponse(url="/admin/login", status_code=303)
+    destination = safe_next(next)
+    try:
+        target = oidc.start(request.session, request.headers.get("host", ""), destination)
+    except oidc.OidcError as exc:
+        log.warning("sign-in could not start: %s", exc)
+        return _login_page(
+            request, "De inlogdienst is nu niet bereikbaar. Log in met je wachtwoord.", destination if next else "", 502
+        )
+    return RedirectResponse(url=target, status_code=303)
+
+
+@router.get("/oidc/callback")
+def oidc_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    if not oidc.enabled():
+        return RedirectResponse(url="/admin/login", status_code=303)
+    if error:
+        request.session.pop(oidc.PENDING_KEY, None)
+        log.info("sign-in refused by Authentik: %s", error)
+        return _login_page(request, "Inloggen is afgebroken of geweigerd.", status_code=400)
+    try:
+        user, destination = oidc.finish(request.session, code, state)
+    except oidc.OidcDenied as exc:
+        log.warning("sign-in denied: %s", exc)
+        return _login_page(request, "Je account heeft geen toegang tot Trendwatch. Vraag de beheerder om je toe te voegen.", status_code=403)
+    except oidc.OidcError as exc:
+        log.warning("sign-in failed: %s", exc)
+        return _login_page(request, "Inloggen is mislukt. Probeer het opnieuw, of log in met je wachtwoord.", status_code=400)
+    start_session(request, remember=True, seconds=settings.oidc_session_days * 86400, user=user)
+    return RedirectResponse(url=safe_next(destination), status_code=303)
 
 
 @router.post("/logout")

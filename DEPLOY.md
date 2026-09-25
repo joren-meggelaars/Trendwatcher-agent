@@ -251,6 +251,28 @@ Goed om te weten:
   "Veilig ophalen van bronnen".
 - Alleen `web` is bereikbaar; de API (`scoring-service`) blijft intern.
 
+## Inloggen via Authentik (optioneel)
+
+Met de identity-platform-stack (Authentik) op dezelfde VM log je in met je
+eigen account (passkey of authenticator-app) in plaats van het gedeelde
+wachtwoord. Het wachtwoord blijft werken als noodtoegang als Authentik plat ligt.
+
+1. Eenmalig op de host, als dat nog niet gebeurd is: `docker network create identity-apps`.
+   De `web`-container hangt aan dat netwerk en bereikt Authentik als `http://authentik:9000`;
+   zonder dat netwerk start de stack niet.
+2. In `~/identity-platform/.env`: `echo "TRENDWATCHER_OIDC_SECRET=$(openssl rand -hex 32)" >> .env`,
+   dan `git pull && docker compose up -d`. De blueprint `blueprints/trendwatcher.yaml` maakt
+   de provider, de applicatie en de groep `trendwatcher-admin`.
+3. In Authentik: zet jezelf (en wie verder mag) in de groep `trendwatcher-admin`.
+4. In de `.env` van TrendWatcher het `OIDC_*`-blok invullen (zie `.env.example`):
+   issuer `https://auth.<domein>/application/o/trendwatcher/`, hetzelfde secret, en elk
+   adres waarop je de GUI opent eindigend op `/admin/oidc/callback` (die moeten ook in de
+   blueprint staan). Dan `docker compose up -d --build web`.
+
+Een half ingevuld blok stopt de `web`-container bij het starten met een melding welke
+waarde ontbreekt (`docker compose logs web`). `OIDC_ISSUER` leeg = weer alleen het wachtwoord.
+Een login via Authentik geldt `OIDC_SESSION_DAYS` dagen (standaard 7).
+
 ## Veilig ophalen van bronnen
 
 Alles wat het systeem van internet haalt gaat via één functie (`safe_fetch.py`,

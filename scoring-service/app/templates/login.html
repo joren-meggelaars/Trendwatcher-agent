@@ -6,6 +6,12 @@
   <h1>Inloggen</h1>
   <p class="lead">{% if next %}Log in om verder te gaan.{% else %}Beheer van je security trendwatch.{% endif %}</p>
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  {% if oidc_enabled %}
+  <a class="btn btn-primary" href="/admin/oidc/start{% if next %}?next={{ next|urlencode }}{% endif %}">Inloggen met je account</a>
+  <p class="hint login-sso-hint">Met je passkey of authenticator-app.</p>
+  <details class="login-fallback"{% if open_password %} open{% endif %}>
+    <summary>Noodtoegang met wachtwoord</summary>
+  {% endif %}
   <form method="post" action="/admin/login">
     {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
     <div class="field">
@@ -20,7 +26,8 @@
       <label class="checkline"><input type="checkbox" name="remember" value="1"> Onthoud mij {{ remember_days }} dagen</label>
       <p class="hint">Zonder vinkje blijf je 12 uur ingelogd. Vink dit alleen aan op een toestel dat van jou is.</p>
     </div>
-    <button type="submit" class="btn btn-primary">Inloggen</button>
+    <button type="submit" class="btn{% if not oidc_enabled %} btn-primary{% endif %}">Inloggen</button>
   </form>
+  {% if oidc_enabled %}</details>{% endif %}
 </div>
 {% endblock %}

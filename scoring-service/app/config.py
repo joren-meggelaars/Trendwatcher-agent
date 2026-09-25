@@ -1,7 +1,8 @@
 import secrets
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -56,6 +57,56 @@ class Settings(BaseSettings):
     # button. Reachable via the shared Docker network, not published to the
     # host — never exposed to the internet.
     scheduler_url: str = "http://scheduler:8001"
+
+    # Optional sign-in through Authentik (app/oidc.py, the identity-platform repo).
+    # Empty issuer = off: only the username/password login. With it set, the
+    # password login stays as the emergency way in.
+    # Issuer = what the browser sees: https://<authentik host>/application/o/trendwatcher/
+    oidc_issuer: str = ""
+    oidc_client_id: str = "trendwatcher"
+    oidc_client_secret: str = ""
+    # Every address the GUI is opened on, ending in /admin/oidc/callback (space separated).
+    oidc_redirect_uris: str = ""
+    # How the container reaches Authentik over the shared docker network.
+    oidc_internal_url: str = ""
+    oidc_admin_group: str = "trendwatcher-admin"
+    oidc_session_days: int = 7
+
+    @property
+    def oidc_redirect_uri_list(self) -> list[str]:
+        return [u for u in self.oidc_redirect_uris.replace(",", " ").split() if u]
+
+    @model_validator(mode="after")
+    def _check_oidc(self) -> "Settings":
+        """A half-filled OIDC block stops the start, not the first sign-in."""
+        if not self.oidc_issuer:
+            return self
+
+        def secure(url: str) -> bool:
+            parsed = urlsplit(url)
+            return parsed.scheme == "https" or (parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1"))
+
+        missing = [
+            name
+            for name, value in (
+                ("OIDC_CLIENT_ID", self.oidc_client_id),
+                ("OIDC_CLIENT_SECRET", self.oidc_client_secret),
+                ("OIDC_REDIRECT_URIS", self.oidc_redirect_uri_list),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValueError(f"OIDC_ISSUER is set, so these are required too: {', '.join(missing)}")
+        if not secure(self.oidc_issuer):
+            raise ValueError("OIDC_ISSUER must be an https URL (http only for localhost)")
+        for uri in self.oidc_redirect_uri_list:
+            if not secure(uri) or not uri.endswith("/admin/oidc/callback"):
+                raise ValueError(f"OIDC_REDIRECT_URIS entry {uri!r} must be an https URL ending in /admin/oidc/callback")
+        if self.oidc_internal_url and urlsplit(self.oidc_internal_url).scheme not in ("http", "https"):
+            raise ValueError("OIDC_INTERNAL_URL must be an http(s) URL")
+        if not 1 <= self.oidc_session_days <= 90:
+            raise ValueError("OIDC_SESSION_DAYS must be between 1 and 90")
+        return self
 
     @field_validator("session_secret_key", mode="after")
     @classmethod

@@ -1,6 +1,9 @@
 networks:
   trendwatch-net:
     driver: bridge
+  # Shared with the identity-platform stack (Authentik); created outside compose.
+  identity-apps:
+    external: true
 
 volumes:
   trendwatch_pgdata:
@@ -96,6 +99,15 @@ services:
       # posts from this origin are accepted even if the proxy rewrites Host.
       PUBLIC_BASE_URL: ${FEEDBACK_BASE_URL:-http://${BIND_ADDRESS}:8000}
       SCHEDULER_URL: http://scheduler:${TRIGGER_SERVER_PORT:-8001}
+      # Optional sign-in through Authentik (identity-platform repo); OIDC_ISSUER
+      # empty = off, only the password login. See .env.example.
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-trendwatcher}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URIS: ${OIDC_REDIRECT_URIS:-}
+      OIDC_INTERNAL_URL: ${OIDC_INTERNAL_URL:-http://authentik:9000}
+      OIDC_ADMIN_GROUP: ${OIDC_ADMIN_GROUP:-trendwatcher-admin}
+      OIDC_SESSION_DAYS: ${OIDC_SESSION_DAYS:-7}
       # Console-only, local testing only: turns off the check that stops the server
       # from fetching internal addresses (app/safe_fetch.py). Never true on the VM.
       SAFE_FETCH_ALLOW_PRIVATE: ${SAFE_FETCH_ALLOW_PRIVATE:-false}
@@ -118,6 +130,9 @@ services:
       start_period: 10s
     networks:
       - trendwatch-net
+      # Reaches Authentik as http://authentik:9000 (token exchange, server to
+      # server). Create it once on the host: docker network create identity-apps
+      - identity-apps
 
   scheduler:
     build:

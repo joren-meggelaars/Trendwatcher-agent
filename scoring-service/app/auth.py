@@ -1,7 +1,9 @@
 """Auth for the admin GUI: one fixed account, session-cookie based.
 
-Deliberately not OAuth/JWT: a signed session cookie (Starlette's
-SessionMiddleware) behind a single username/password is enough for one person.
+A signed session cookie (Starlette's SessionMiddleware) behind a single
+username/password. Optionally people sign in through Authentik instead
+(app/oidc.py); that ends in the same session, and the password login then
+stays as the emergency way in.
 The GUI can be reachable from the internet, so a few things are stricter than
 "local only" would need: bcrypt hash, a brake on wrong passwords
 (app/security.py), a server-side expiry on every session and a new session on
@@ -23,6 +25,7 @@ _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 SESSION_KEY = "is_admin"
 SESSION_EXPIRES_KEY = "exp"
+SESSION_USER_KEY = "user"  # set by a sign-in through Authentik (app/oidc.py)
 
 REMEMBER_DAYS = 30
 SHORT_SESSION_HOURS = 12
@@ -43,13 +46,17 @@ def verify_admin_credentials(username: str, password: str) -> bool:
     return _pwd_context.verify(password, settings.admin_password_hash)
 
 
-def start_session(request: Request, remember: bool) -> None:
+def start_session(request: Request, remember: bool, *, seconds: int | None = None, user: str = "") -> None:
     """A fresh session for a successful login (never reuse the one from before
-    it), valid 30 days with `remember`, otherwise 12 hours."""
+    it), valid 30 days with `remember`, otherwise 12 hours. A sign-in through
+    Authentik passes its own lifetime (`seconds`) and who signed in (`user`)."""
     request.session.clear()
     request.session[SESSION_KEY] = True
-    lifetime = REMEMBER_DAYS * 24 * 3600 if remember else SHORT_SESSION_HOURS * 3600
-    request.session[SESSION_EXPIRES_KEY] = int(time.time() + lifetime)
+    if seconds is None:
+        seconds = REMEMBER_DAYS * 24 * 3600 if remember else SHORT_SESSION_HOURS * 3600
+    request.session[SESSION_EXPIRES_KEY] = int(time.time() + min(seconds, SESSION_MAX_AGE))
+    if user:
+        request.session[SESSION_USER_KEY] = user
 
 
 def safe_next(value: str | None, default: str = DEFAULT_LANDING) -> str:
