@@ -11,7 +11,7 @@ een werkende `docker`/`docker compose`-installatie.
 git clone <repo-url> trendwatcher-agent
 cd trendwatcher-agent
 
-cp .env.example .env
+cp -n .env.example .env
 nano .env   # of vim/etc.
 ```
 

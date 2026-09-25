@@ -9,7 +9,7 @@ van elkaar naar Azure kunnen (Container App / Function).
 
 ```bash
 uv sync
-cp .env.example .env
+cp -n .env.example .env
 # vul minimaal SCORING_SERVICE_URL in; GRAPH_*/DIGEST_MAILBOX en SEARCH_*
 # mogen leeg blijven om zonder e-mail/zoek-API te testen (zie hieronder) —
 # DIGEST_DRY_RUN staat standaard op true

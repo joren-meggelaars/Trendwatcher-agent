@@ -11,7 +11,7 @@ latere fases. Alles hieronder draait lokaal met `uv` en SQLite.
 
 ```bash
 uv sync
-cp .env.example .env
+cp -n .env.example .env
 # vul VOYAGE_API_KEY in .env in, of laat EMBEDDING_PROVIDER=fake staan
 # om zonder API-key te kunnen testen
 ```
