@@ -28,15 +28,18 @@ _current_digest_hour = config.DIGEST_HOUR
 _current_digest_days = config.DIGEST_DAYS
 _sync_lock = threading.Lock()  # the sync tick and a "save" from the admin GUI can coincide
 
+def _cron(**fields) -> CronTrigger:
+    """A cron trigger at minute 0 in the configured zone (APScheduler otherwise uses the container's, i.e. UTC)."""
+    return CronTrigger(minute=0, timezone=config.zone(), **fields)
+
+
 # When each job runs, built from `config` at the moment it is needed — so
 # startup and a later settings change (see _sync_settings) always agree.
 # daily_digest is not here: its hour and days come from the digest settings page.
 _TRIGGERS = {
     "ingest": lambda: IntervalTrigger(minutes=config.INGEST_INTERVAL_MINUTES),
-    "weekly_discovery": lambda: CronTrigger(
-        day_of_week=config.DISCOVERY_DAY, hour=config.DISCOVERY_HOUR, minute=0
-    ),
-    "mailbox_ingest": lambda: CronTrigger(hour=config.MAILBOX_INGEST_HOUR, minute=0),
+    "weekly_discovery": lambda: _cron(day_of_week=config.DISCOVERY_DAY, hour=config.DISCOVERY_HOUR),
+    "mailbox_ingest": lambda: _cron(hour=config.MAILBOX_INGEST_HOUR),
 }
 # Which settings a job's schedule depends on: when one changes, it is rescheduled.
 _SCHEDULE_SETTINGS = {
@@ -71,7 +74,7 @@ def _sync_settings(scheduler: BlockingScheduler) -> None:
                 "Digest-planning gewijzigd: %s om %02d:00 -> %s om %02d:00, herplannen.",
                 _current_digest_days, _current_digest_hour, new_days, new_hour,
             )
-            scheduler.reschedule_job("daily_digest", trigger=CronTrigger(day_of_week=new_days, hour=new_hour, minute=0))
+            scheduler.reschedule_job("daily_digest", trigger=_cron(day_of_week=new_days, hour=new_hour))
             _current_digest_hour, _current_digest_days = new_hour, new_days
 
 
@@ -99,7 +102,7 @@ def _add_jobs(scheduler: BlockingScheduler) -> None:
     )
     scheduler.add_job(
         daily_digest.run,
-        CronTrigger(day_of_week=config.DIGEST_DAYS, hour=config.DIGEST_HOUR, minute=0),
+        _cron(day_of_week=config.DIGEST_DAYS, hour=config.DIGEST_HOUR),
         id="daily_digest",
         name="Dagelijkse digest",
         misfire_grace_time=_CRON_MISFIRE_GRACE_SECONDS,
@@ -138,7 +141,7 @@ def main() -> None:
     # the .env values are used until the first sync tick.
     runtime_settings.sync()
 
-    scheduler = BlockingScheduler()
+    scheduler = BlockingScheduler(timezone=config.zone())
     _add_jobs(scheduler)
 
     # Keep a reference so the server (and its background thread) isn't
@@ -151,10 +154,10 @@ def main() -> None:
     )
 
     logger.info(
-        "Scheduler gestart: ingest elke %d min (eerste run na dat interval), daily_digest op %s om %02d:00, "
+        "Scheduler gestart (tijdzone %s): ingest elke %d min (eerste run na dat interval), daily_digest op %s om %02d:00, "
         "weekly_discovery op %s om %02d:00, mailbox_ingest dagelijks om %02d:00 (enabled=%s), "
         "trigger-server op poort %d",
-        config.INGEST_INTERVAL_MINUTES, config.DIGEST_DAYS, config.DIGEST_HOUR, config.DISCOVERY_DAY, config.DISCOVERY_HOUR,
+        config.TIMEZONE, config.INGEST_INTERVAL_MINUTES, config.DIGEST_DAYS, config.DIGEST_HOUR, config.DISCOVERY_DAY, config.DISCOVERY_HOUR,
         config.MAILBOX_INGEST_HOUR, config.MAILBOX_INGEST_ENABLED, config.TRIGGER_SERVER_PORT,
     )
     scheduler.start()

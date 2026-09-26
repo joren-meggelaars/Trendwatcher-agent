@@ -9,6 +9,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     database_url: str = "sqlite:///./scoring.db"
 
+    # The zone times are shown in (the database keeps UTC). The scheduler reads the same
+    # TIMEZONE, so "digest at 7" means 07:00 here, not 07:00 UTC.
+    timezone: str = "Europe/Amsterdam"
+
     voyage_api_key: str = ""
     voyage_model: str = "voyage-3"
     embedding_provider: Literal["voyage", "fake"] = "voyage"

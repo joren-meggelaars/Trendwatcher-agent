@@ -17,6 +17,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "psycopg[binary]>=3.2",
     "pgvector>=0.3.6",
+    "tzdata>=2024.1",
 ]
 
 [tool.pytest.ini_options]

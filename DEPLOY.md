@@ -107,6 +107,13 @@ wacht nooit op de scoring. Bij de Voyage-gratis-tier
 ruim een uur op de achtergrond; met een betaalmethode
 (`SCORE_REQUEST_DELAY_SECONDS=0`) is het in minuten klaar.
 
+### Tijdzone
+
+De containers draaien op UTC. Met `TIMEZONE` (standaard `Europe/Amsterdam`) toont
+de GUI alle tijden lokaal, staat de datum in de mail op de lokale dag, en
+betekent `DIGEST_HOUR=7` (of het uur op `/admin/settings`) 07:00 lokaal. De logs
+van de scheduler blijven UTC. Na het wijzigen: `docker compose up -d`.
+
 ### Instellingen achteraf aanpassen
 
 Veel waarden uit `.env` (scorepauze, ingest-interval, dry-run, discovery, drempels

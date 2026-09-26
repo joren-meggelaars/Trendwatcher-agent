@@ -173,6 +173,9 @@ def build_digest_html(
     """One mail, one section per DIGEST_SECTIONS entry (an empty one says so).
     `digest_id` (from record_digest) makes the 👍/👎 buttons open that digest."""
     when = when or datetime.now(timezone.utc)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    when = when.astimezone(config.zone())  # the date on the mail is the local one
     counts = " · ".join(f"{len(items_by_category.get(cat, []))} {label.lower()}" for cat, label in DIGEST_SECTIONS)
     sections = "".join(
         _section_html(heading, category, items_by_category.get(category, []), digest_id)

@@ -40,7 +40,7 @@
     <span>{{ card.source }}</span>
     <span class="badge badge-{{ card.category }}">{{ card.category }}</span>
     <span>score {{ "%.2f"|format(card.score) }}</span>
-    <span>{{ card.created.strftime("%Y-%m-%d") }}</span>
+    <span>{{ card.created|local_time("%Y-%m-%d") }}</span>
   </div>
   <p class="item-summary">{{ card.summary or "(geen samenvatting)" }}</p>
   <form method="post" action="/admin/review/{{ card.id }}" class="vote-row">

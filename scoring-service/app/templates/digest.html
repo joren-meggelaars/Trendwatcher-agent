@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Digest {{ digest.created_at.strftime("%d-%m-%Y") }}{% endblock %}
+{% block title %}Digest {{ digest.created_at|local_time("%d-%m-%Y") }}{% endblock %}
 {% block container_class %}narrow{% endblock %}
 {% block content %}
 <div data-digest>
 
 <div class="hero">
-  <h1>Digest van {{ digest.created_at.strftime("%d-%m-%Y") }}</h1>
+  <h1>Digest van {{ digest.created_at|local_time("%d-%m-%Y") }}</h1>
   <p class="sub">
-    {{ digest.created_at.strftime("%H:%M") }} UTC ·
+    {{ digest.created_at|local_time("%H:%M") }} ·
     {% if digest.kind == "preview" %}voorbeeld ("Verstuur nu"){% else %}dagelijkse digest{% endif %}
     {% if not digest.mailed %} · niet verstuurd (dry-run of mislukt){% endif %}
   </p>

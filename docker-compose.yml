@@ -111,6 +111,8 @@ services:
       # Console-only, local testing only: turns off the check that stops the server
       # from fetching internal addresses (app/safe_fetch.py). Never true on the VM.
       SAFE_FETCH_ALLOW_PRIVATE: ${SAFE_FETCH_ALLOW_PRIVATE:-false}
+      # Zone for times in the GUI and for the schedule (the containers run on UTC).
+      TIMEZONE: ${TIMEZONE:-Europe/Amsterdam}
     depends_on:
       scoring-service:
         condition: service_healthy
@@ -174,6 +176,8 @@ services:
       SETTINGS_SYNC_INTERVAL_SECONDS: ${SETTINGS_SYNC_INTERVAL_SECONDS:-300}
       SEEN_ITEMS_PATH: /app/data/seen_items.json
       SAFE_FETCH_ALLOW_PRIVATE: ${SAFE_FETCH_ALLOW_PRIVATE:-false}
+      # Zone for times in the GUI and for the schedule (the containers run on UTC).
+      TIMEZONE: ${TIMEZONE:-Europe/Amsterdam}
     volumes:
       - trendwatch_scheduler_data:/app/data
     depends_on:

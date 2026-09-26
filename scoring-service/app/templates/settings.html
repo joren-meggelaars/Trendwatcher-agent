@@ -17,7 +17,7 @@
   <h2 class="mt-0">Frequentie en inhoud</h2>
   <form method="post" action="/admin/settings">
     <div class="field">
-      <label for="digest_hour">Uur van de dag (0-23)</label>
+      <label for="digest_hour">Uur van de dag (0-23, tijd in {{ timezone_name() }})</label>
       <input id="digest_hour" type="number" name="digest_hour" min="0" max="23" value="{{ settings.digest_hour }}" size="6">
     </div>
     <div class="field">
@@ -38,7 +38,7 @@
   </form>
   <p class="hint mt-1">
     Het aantal items geldt vanaf de eerstvolgende run. Een gewijzigd uur wordt binnen enkele minuten door de
-    scheduler overgenomen (geen herstart nodig). Laatst gewijzigd: {{ settings.updated_at.strftime("%Y-%m-%d %H:%M") }}.
+    scheduler overgenomen (geen herstart nodig). Laatst gewijzigd: {{ settings.updated_at|local_time("%Y-%m-%d %H:%M") }}.
   </p>
 </div>
 

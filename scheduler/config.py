@@ -6,14 +6,30 @@ Function / Container App on its own), so it only pulls in what jobs/*.py
 actually needs (feedparser, httpx, apscheduler, python-dotenv).
 """
 
+import logging
 import os
+from datetime import timezone, tzinfo
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 SCORING_SERVICE_URL = os.environ.get("SCORING_SERVICE_URL", "http://127.0.0.1:8000").rstrip("/")
+
+# The zone the schedule is read in: "digest at 7" means 07:00 here, not 07:00 UTC (the
+# containers run on UTC). The admin GUI shows times in the same zone (its TIMEZONE).
+TIMEZONE = os.environ.get("TIMEZONE", "").strip() or "Europe/Amsterdam"
+
+
+def zone() -> tzinfo:
+    """TIMEZONE as a tzinfo; an unknown name falls back to UTC (with a warning) instead of crashing."""
+    try:
+        return ZoneInfo(TIMEZONE)
+    except (ZoneInfoNotFoundError, ValueError):
+        logging.getLogger(__name__).warning("Onbekende tijdzone TIMEZONE=%r, UTC wordt gebruikt.", TIMEZONE)
+        return timezone.utc
 
 # Base URL used for the 👍/👎 links *inside the digest email*. Must be
 # reachable from the reader's browser, so it can't be the internal Docker

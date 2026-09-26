@@ -15,8 +15,8 @@
 <tbody>
 {% for row in rows %}
 <tr>
-  <td class="nowrap"><a href="/admin/digest/{{ row.id }}"><strong>{{ row.created.strftime("%d-%m-%Y") }}</strong></a>
-      <small>{{ row.created.strftime("%H:%M") }}</small></td>
+  <td class="nowrap"><a href="/admin/digest/{{ row.id }}"><strong>{{ row.created|local_time("%d-%m-%Y") }}</strong></a>
+      <small>{{ row.created|local_time("%H:%M") }}</small></td>
   <td>
     {% if row.kind == "preview" %}<span class="badge badge-muted">voorbeeld</span>{% else %}<span class="badge badge-ok">dagelijks</span>{% endif %}
     {% if not row.mailed %}<span class="badge badge-warn">niet verstuurd</span>{% endif %}

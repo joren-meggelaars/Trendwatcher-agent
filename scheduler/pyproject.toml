@@ -9,6 +9,7 @@ dependencies = [
     "apscheduler>=3.10",
     "python-dotenv>=1.0",
     "msal>=1.28",
+    "tzdata>=2024.1",
 ]
 
 [tool.pytest.ini_options]

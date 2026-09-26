@@ -23,6 +23,7 @@ from app import (
     digest_settings,
     digest_view,
     discovery,
+    localtime,
     models,
     oidc,
     review,
@@ -62,6 +63,8 @@ def _safe_url(value: str | None) -> str:
 
 
 templates.env.filters["safe_url"] = _safe_url
+templates.env.filters["local_time"] = localtime.local_time
+templates.env.globals["timezone_name"] = lambda: settings.timezone
 
 ITEMS_PER_PAGE = 50
 

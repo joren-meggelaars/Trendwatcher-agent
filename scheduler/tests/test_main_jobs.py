@@ -64,3 +64,46 @@ def test_a_rescheduled_digest_keeps_its_grace_time(monkeypatch):
     scheduler.reschedule_job("daily_digest", trigger=CronTrigger(day_of_week="mon", hour=9, minute=0))
 
     assert scheduler.get_job("daily_digest").misfire_grace_time == main._CRON_MISFIRE_GRACE_SECONDS
+
+
+# --- the schedule is read in the configured zone, not in the container's UTC -----------------------
+
+
+def _next_fire_utc(job, after):
+    from datetime import timezone
+
+    return job.trigger.get_next_fire_time(None, after).astimezone(timezone.utc)
+
+
+def test_the_digest_hour_is_local_time_in_summer_and_winter(monkeypatch):
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(config, "TIMEZONE", "Europe/Amsterdam")
+    monkeypatch.setattr(config, "DIGEST_DAYS", "mon,tue,wed,thu,fri,sat,sun")
+    monkeypatch.setattr(config, "DIGEST_HOUR", 7)
+    job = _scheduler(monkeypatch).get_job("daily_digest")
+
+    assert _next_fire_utc(job, datetime(2026, 9, 26, 0, 0, tzinfo=timezone.utc)) == datetime(2026, 9, 26, 5, 0, tzinfo=timezone.utc)
+    assert _next_fire_utc(job, datetime(2026, 1, 15, 0, 0, tzinfo=timezone.utc)) == datetime(2026, 1, 15, 6, 0, tzinfo=timezone.utc)
+
+
+def test_a_rescheduled_digest_stays_in_the_configured_zone(monkeypatch):
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(config, "TIMEZONE", "Europe/Amsterdam")
+    scheduler = _scheduler(monkeypatch)
+    scheduler.reschedule_job("daily_digest", trigger=main._cron(day_of_week="mon,tue,wed,thu,fri,sat,sun", hour=9))
+
+    job = scheduler.get_job("daily_digest")
+    assert _next_fire_utc(job, datetime(2026, 9, 26, 0, 0, tzinfo=timezone.utc)) == datetime(2026, 9, 26, 7, 0, tzinfo=timezone.utc)
+
+
+def test_an_unknown_zone_falls_back_to_utc_instead_of_crashing(monkeypatch):
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(config, "TIMEZONE", "Not/AZone")
+    monkeypatch.setattr(config, "DIGEST_DAYS", "mon,tue,wed,thu,fri,sat,sun")
+    monkeypatch.setattr(config, "DIGEST_HOUR", 7)
+    job = _scheduler(monkeypatch).get_job("daily_digest")
+
+    assert _next_fire_utc(job, datetime(2026, 9, 26, 0, 0, tzinfo=timezone.utc)) == datetime(2026, 9, 26, 7, 0, tzinfo=timezone.utc)

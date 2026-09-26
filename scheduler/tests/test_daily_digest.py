@@ -292,3 +292,13 @@ def test_an_item_without_a_summary_still_renders_and_a_non_http_link_is_defused(
 
     assert "javascript:" not in html_out
     assert "Kritieke kwetsbaarheid ontdekt" in html_out
+
+
+def test_the_mail_shows_the_local_date_not_the_utc_one(monkeypatch):
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(config, "TIMEZONE", "Europe/Amsterdam")
+    late_evening_utc = datetime(2026, 9, 19, 22, 30, tzinfo=timezone.utc)  # already the 20th in the Netherlands
+
+    assert "20 september 2026" in daily_digest.build_digest_html({"markt": [_DIGEST_ITEM]}, when=late_evening_utc)
+    assert "20 september 2026" in daily_digest.build_digest_html({"markt": [_DIGEST_ITEM]}, when=late_evening_utc.replace(tzinfo=None))
